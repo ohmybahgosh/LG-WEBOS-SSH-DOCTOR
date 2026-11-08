@@ -452,7 +452,13 @@ test_settings_not_applied_and_boot() {
     sshd_up
     json
     check "noticed" finding settings-not-applied
+    # As at a real boot: the Homebrew Channel's failsafe flag is there while
+    # init.d runs, and goes away a few seconds later
+    : > "$SD_ROOT/var/luna/preferences/webosbrew_failsafe"
+    ( sleep 2; rm -f "$SD_ROOT/var/luna/preferences/webosbrew_failsafe" ) &
     $SH "$SD_ROOT/var/lib/webosbrew/ssh-doctor/ssh-doctor.sh" boot > "$T/boot.log" 2>&1
+    check "boot waited for the failsafe flag" sh -c "grep -q applying '$T/boot.log'"
+    check "no error copying the script onto itself" sh -c "! grep -q 'same file' '$T/boot.log'"
     json
     check "boot applied it" is "$(flags)" "-R -K 30"
     check "nothing pending" nofinding settings-not-applied

@@ -502,7 +502,8 @@ shadow_default() {
 # Channel's run-parts after it starts SSH
 install_hook() {
     mkdir -p "$SDDIR" "${HOOK%/*}" && chmod 700 "$SDDIR"
-    cp "$HERE/ssh-doctor.sh" "$SDDIR/ssh-doctor.sh"
+    # At boot this runs from that copy itself
+    [ "$HERE/ssh-doctor.sh" -ef "$SDDIR/ssh-doctor.sh" ] || cp "$HERE/ssh-doctor.sh" "$SDDIR/ssh-doctor.sh"
     cat > "$HOOK" <<'EOF'
 #!/bin/sh
 # Added by LG webOS SSH Doctor: puts its SSH settings back after a restart.
@@ -523,11 +524,16 @@ apply() {
     restart_dropbear
 }
 
-# At boot, from the hook: wait for the Homebrew Channel's dropbear, then apply
+# At boot, from the hook.  The Homebrew Channel sets its failsafe flag while
+# it starts up and runs init.d, then clears it 10 seconds later; it only
+# skips init.d when the flag was still there from a boot that went wrong.
+# So wait for the flag to go (and for its dropbear), then apply.
 boot() {
     _i=0
+    while [ $_i -lt 90 ] && [ -f "$FAILSAFE" ]; do sleep 1; _i=$((_i + 1)); done
+    [ -f "$FAILSAFE" ] && { say "$(date): the failsafe flag stayed, so the settings weren't applied."; return 0; }
+    _i=0
     while [ $_i -lt 30 ] && [ -f "$SSHD_FLAG" ] && [ -z "$(hbc_masters)" ]; do sleep 1; _i=$((_i + 1)); done
-    [ -f "$FAILSAFE" ] && { say "Failsafe mode: settings not applied."; return 0; }
     say "$(date): applying $(dropbear_flags)"
     apply
 }
