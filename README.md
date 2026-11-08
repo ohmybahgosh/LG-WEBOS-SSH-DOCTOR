@@ -2,7 +2,9 @@
 
 **SSH on your rooted LG TV stopped working?  This app finds out why and fixes it from the TV itself, with just the remote.**  It also sets up an SSH key for your computer or phone with a short pairing code, so nobody has to copy keys around by hand.
 
-> **Status: first version in testing.**  The app works, and its tests run on every change, but it hasn't been released yet.  Watch or star the repo to hear when it's in the Homebrew Channel.
+## Install
+
+In the Homebrew Channel, add the repository `https://ohmybahgosh.dev/repo` (Settings, then Add repository), then install **SSH Doctor** from the app list.  Or download the IPK from the [latest release](https://github.com/ohmybahgosh/LG-WEBOS-SSH-DOCTOR/releases/latest) and install it with Dev Manager or `ares-install`.  It needs root, which the Homebrew Channel already has.
 
 It's a TV app for the [webOS Homebrew Channel](https://github.com/webosbrew/webos-homebrew-channel) on rooted LG webOS TVs ([RootMyTV](https://rootmy.tv), [faultmanager-autoroot](https://github.com/throwaway96/faultmanager-autoroot), crashd, DejaVuln and the rest).  It runs as root through the Homebrew Channel, not over SSH, so it still works when SSH is completely broken.
 
