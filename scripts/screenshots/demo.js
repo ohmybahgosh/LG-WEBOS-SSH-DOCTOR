@@ -14,7 +14,7 @@
         { type: 'ssh-rsa', fp: 'SHA256:0+Bbg/DcPTyzN9cG2jg00lDOV26ns23I1ilRaGycXM8' }
     ];
     var base = {
-        version: '0.2.0', hbc: true, sshEnabled: true, running: true, listening: true, dropbear: '2022.83',
+        version: '0.3.0', hbc: true, sshEnabled: true, running: true, listening: true, dropbear: '2022.83',
         password: 'none', keys: 1, keyFile: true, keyProblems: '', permProblems: '', telnet: true, telnetRunning: true,
         failsafe: false, legacyRsa: false, ips: ['192.168.1.50'], hostKeys: host, findings: [],
         port: 22, portOwner: 'hbc', keysOnly: false, sftp: true, failedLogins: 0,
@@ -75,7 +75,7 @@
             failedFrom: st.failedLogins ? [{ ip: '192.168.1.77', n: st.failedLogins }] : [],
             lastUsed: { 'SHA256:m3MvfV9IuUH4vKFN5CRBQGhIDOEanmNp29OKzXEOpRI': '2026-11-08T12:31:05Z' } }),
         'hostkeys --json': JSON.stringify(host.map(function (h) { return { type: h.type, fp: h.fp, line: h.type + ' AAAA' }; })),
-        'report': 'LG webOS SSH Doctor 0.2.0 report\nwebOS: 9.2.0\nKernel: 5.4.268\nHomebrew Channel: installed, SSH switch yes, telnet yes, failsafe no\ndropbear: 2022.83, running yes, port 22, owner hbc\nOptions: wanted -R, running -R\nLogin: password none, keys 1, keys only no\nFindings: \nLogins in the log: 4 logins, 0 failed tries',
+        'report': 'LG webOS SSH Doctor 0.3.0 report\nwebOS: 9.2.0\nKernel: 5.4.268\nHomebrew Channel: installed, SSH switch yes, telnet yes, failsafe no\ndropbear: 2022.83, running yes, port 22, owner hbc\nOptions: wanted -R, running -R\nLogin: password none, keys 1, keys only no\nFindings: \nLogins in the log: 4 logins, 0 failed tries',
         'pair-reject': '{"state":"rejected"}'
     };
     function pairState() {
