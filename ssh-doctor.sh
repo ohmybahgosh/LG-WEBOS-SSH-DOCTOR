@@ -3,11 +3,14 @@
 #
 # Runs as root under busybox sh, from the TV app (through the Homebrew
 # Channel's exec service) or over telnet.  It only touches the Homebrew
-# Channel's SSH switch, /home/root/.ssh and, to turn the alpine password back
-# on, the same bind-mounted /etc/shadow the Homebrew Channel uses at boot.
+# Channel's SSH and telnet switches, /home/root/.ssh, the Homebrew Channel's
+# dropbear (restarted with your settings), its host keys (backed up first),
+# and root's password through the same bind-mounted /etc/shadow the Homebrew
+# Channel uses at boot.  Settings live in /var/lib/webosbrew/ssh-doctor and a
+# startup hook in /var/lib/webosbrew/init.d puts them back after a restart.
 # Every file it changes is backed up first.
 #
-# Usage: sh ssh-doctor.sh COMMAND [--json]
+# Usage: sh ssh-doctor.sh COMMAND [ARGS]
 #   status [--json]   what decides whether SSH login works, and what's wrong
 #   ssh-on            turn SSH on in the Homebrew Channel and start it now
 #   fix-keys          repair /home/root/.ssh/authorized_keys and permissions
@@ -16,13 +19,28 @@
 #   keys [--json]     the keys that can log in, with fingerprints
 #   backups [--json]  the backups this script made
 #   restore NAME      put a backup of authorized_keys back
-#   pair-start | pair-status | pair-accept | pair-reject | pair-stop
-#                     the pairing page, for adding a key from a PC or phone
+#   key-remove FP | key-rename FP NAME
+#                     take one key out, or change its name (by fingerprint)
+#   servers [--json]  every SSH server running on the TV, and its ports
+#   settings [--json] the SSH settings this script manages
+#   set-password HASH root's own password, as a SHA-512 crypt hash ($6$...)
+#   clear-password    back to the Homebrew Channel's password handling
+#   set-keys-only on|off, set-keepalive on|off
+#   set-port PORT     move SSH to PORT; the old port stays open until
+#   port-keep | port-revert   you keep the new one, or go back
+#   reset-settings    remove every setting and go back to the defaults
+#   apply             restart SSH with the saved settings
+#   logins [--json]   recent SSH logins and failed tries, from the TV's log
+#   hostkeys [--json] | hostkeys-reset   the TV's own SSH keys
+#   telnet-off | telnet-on
+#   report            a short report for asking for help, private bits left out
+#   pair-start [key|password] | pair-status | pair-accept | pair-reject |
+#   pair-stop         the pairing page, for a key or password from a PC or phone
 #   version
 #
 # Paths can be moved under SD_ROOT for the tests.
 
-VERSION="0.1.0"
+VERSION="0.2.0"
 R="${SD_ROOT:-}"
 HERE=$(cd "$(dirname "$0")" && pwd)
 
@@ -45,6 +63,18 @@ NODE="${SD_NODE:-}"
 # The Homebrew Channel's placeholder password, crypt("alpine")
 ALPINE_HASH='xGVw8H4GqkKg6'
 PAIR_PORT="${SD_PAIR_PORT:-28622}"
+TELNETD="$HBC_SVC/bin/telnetd"
+SFTP_SERVER="$HBC_SVC/bin/sftp-server"
+# This script's settings, and the startup hook that puts them back after a
+# restart (the Homebrew Channel runs init.d with run-parts after starting SSH)
+SDDIR="$R/var/lib/webosbrew/ssh-doctor"
+CONF="$SDDIR/settings"
+PWHASH="$SDDIR/root.hash"
+HOOK="$R/var/lib/webosbrew/init.d/60-ssh-doctor"
+# webOS's system log, where dropbear writes logins and failed tries
+LOGDIR="${SD_LOGDIR:-$R/tmp/var/log}"
+# Seconds between keepalives when that setting is on
+KEEPALIVE_SECS=30
 # Who should own .ssh and the key file (root; the tests can't chown)
 OWNER="${SD_OWNER:-0}"
 
@@ -83,6 +113,14 @@ listening() {
     cat "$PROC/net/tcp" "$PROC/net/tcp6" 2>/dev/null | awk -v p="$_hex" '
         { n = split($2, a, ":"); if (":" a[n] == p && $4 == "0A") f = 1 }
         END { exit f ? 0 : 1 }'
+}
+
+# Open connections (ESTABLISHED, 01) to local TCP port $1
+sessions_on() {
+    _hex=$(printf ':%04X' "$1")
+    cat "$PROC/net/tcp" "$PROC/net/tcp6" 2>/dev/null | awk -v p="$_hex" '
+        { n = split($2, a, ":"); if (":" a[n] == p && $4 == "01") c++ }
+        END { print c + 0 }'
 }
 
 dropbear_version() {
@@ -253,6 +291,250 @@ host_fingerprints() {
     "$_n" "$HERE/keyinfo.js" host "$HOSTKEYS" 2>/dev/null
 }
 
+# ------------------------------------------------------------------ settings
+
+conf_get() {
+    _cv=$(sed -n "s/^$1=//p" "$CONF" 2>/dev/null | tail -n 1)
+    say "${_cv:-$2}"
+}
+# conf_set KEY VALUE (an empty VALUE removes the setting)
+conf_set() {
+    mkdir -p "$SDDIR" && chmod 700 "$SDDIR"
+    { grep -v "^$1=" "$CONF" 2>/dev/null; [ -n "$2" ] && say "$1=$2"; } > "$CONF.tmp"
+    mv "$CONF.tmp" "$CONF"
+}
+ssh_port() { conf_get PORT 22; }
+trial_port() { conf_get TRIAL ''; }
+# The ports SSH should listen on: the port, and the old one during a change
+ssh_ports() { _tp=$(trial_port); say "$(ssh_port)${_tp:+ $_tp}"; }
+keys_only() { [ "$(conf_get KEYSONLY 0)" = 1 ]; }
+keepalive() { [ "$(conf_get KEEPALIVE 0)" = 1 ]; }
+# Anything set that the Homebrew Channel wouldn't do by itself?
+customized() {
+    [ -f "$PWHASH" ] || [ "$(ssh_port)" != 22 ] || [ -n "$(trial_port)" ] || keys_only || keepalive
+}
+
+# The options dropbear should run with; just -R (like the Homebrew Channel)
+# when nothing is set
+dropbear_flags() {
+    _df="-R"
+    _dp=$(ssh_ports)
+    if [ "$_dp" != 22 ]; then for _x in $_dp; do _df="$_df -p $_x"; done; fi
+    keys_only && _df="$_df -s"
+    keepalive && _df="$_df -K $KEEPALIVE_SECS"
+    say "$_df"
+}
+
+# ------------------------------------------------------------------ servers
+#
+# Every SSH server on the TV, read from /proc: the Homebrew Channel's
+# dropbear, Entware's OpenSSH or dropbear, Developer Mode's sshd (port 9922),
+# or something else.  Sessions (children of a server) are left out.
+
+# "PID PPID COMM" for each dropbear, sshd and telnetd process
+ssh_procs() {
+    for _d in "$PROC"/[0-9]*; do
+        [ -f "$_d/comm" ] || continue
+        _c=$(cat "$_d/comm" 2>/dev/null)
+        case "$_c" in dropbear|sshd|telnetd) ;; *) continue ;; esac
+        _pp=$(sed 's/^.*) [A-Za-z] \([0-9]*\).*/\1/' "$_d/stat" 2>/dev/null)
+        say "${_d##*/} ${_pp:-0} $_c"
+    done
+}
+
+cmdline_of() { tr '\000' ' ' < "$PROC/$1/cmdline" 2>/dev/null | sed 's/ *$//'; }
+
+# Server processes: those whose parent isn't the same kind of server
+server_pids() {
+    ssh_procs > "$RUN/procs.$$"
+    awk 'NR == FNR { c[$1] = $3; next } c[$2] != $3 { print $1, $3 }' "$RUN/procs.$$" "$RUN/procs.$$"
+    rm -f "$RUN/procs.$$"
+}
+
+# "INODE PORT" for each listening TCP socket
+listen_inodes() {
+    cat "$PROC/net/tcp" "$PROC/net/tcp6" 2>/dev/null | awk '$4 == "0A" { n = split($2, a, ":"); print $10, a[n] }' |
+        while read -r _in _hx; do printf '%s %d\n' "$_in" "0x$_hx"; done
+}
+
+# The ports PID listens on, space-separated
+ports_of() {
+    for _fd in "$PROC/$1"/fd/*; do
+        _l=$(readlink "$_fd" 2>/dev/null) || continue
+        case "$_l" in socket:\[*\]) _in=${_l#socket:[}; say "${_in%]}" ;; esac
+    done | sort -u > "$RUN/inodes.$$"
+    listen_inodes | awk 'NR == FNR { s[$1] = 1; next } ($1 in s) { print $2 }' "$RUN/inodes.$$" - | sort -n -u | tr '\n' ' ' | sed 's/ *$//'
+    rm -f "$RUN/inodes.$$"
+}
+
+# hbc, entware-openssh, entware-dropbear, devmode or other
+server_kind() {
+    _cl=$(cmdline_of "$1")
+    case "$_cl" in
+        "$DROPBEAR"*|*/org.webosbrew.hbchannel.service/bin/dropbear*) say hbc; return ;;
+        /opt/*) if [ "$2" = sshd ]; then say entware-openssh; else say entware-dropbear; fi; return ;;
+    esac
+    case " $3 " in *" 9922 "*) say devmode; return ;; esac
+    case "$_cl" in *devmode*|*developer*) [ "$2" = sshd ] && { say devmode; return; } ;; esac
+    say other
+}
+
+# "PID KIND NAME PORTS..." per SSH server (not telnet)
+servers_list() {
+    server_pids | while read -r _p _c; do
+        [ "$_c" = telnetd ] && continue
+        _ps=$(ports_of "$_p")
+        say "$_p $(server_kind "$_p" "$_c" "$_ps") $_c $_ps"
+    done
+}
+
+hbc_masters() { servers_list | awk '$2 == "hbc" { print $1 }'; }
+
+# Who listens on port $1: hbc, another kind, "unknown" (no process found), or nothing
+port_owner() {
+    _o=$(servers_list | awk -v p="$1" '{ for (i = 4; i <= NF; i++) if ($i == p) { print $2; exit } }')
+    if [ -n "$_o" ]; then say "$_o"; elif listening "$1"; then say unknown; fi
+}
+
+servers_json() {
+    printf '['; _f=1
+    servers_list | while read -r _p _k _c _ps; do
+        [ $_f = 1 ] || printf ','; _f=0
+        printf '{"pid":%s,"kind":%s,"name":%s,"ports":[%s],"cmd":%s}' "$_p" "$(js "$_k")" "$(js "$_c")" \
+            "$(printf '%s' "$_ps" | tr ' ' ',')" "$(js "$(cmdline_of "$_p")")"
+    done
+    printf ']'
+}
+
+# The running Homebrew Channel dropbear's options, to compare with ours
+running_flags() {
+    _m=$(hbc_masters | head -n 1)
+    [ -n "$_m" ] || return 0
+    cmdline_of "$_m" | sed 's/^[^ ]*//; s/^ *//'
+}
+settings_applied() {
+    [ -f "$SSHD_FLAG" ] || return 0
+    [ -n "$(hbc_masters)" ] || return 0
+    [ "$(running_flags)" = "$(dropbear_flags)" ]
+}
+
+# Stop the Homebrew Channel's dropbear (open sessions stay up: they're
+# separate processes) and start it again with our options.  If it won't come
+# up that way, start it the Homebrew Channel's way so SSH isn't left off.
+kill_pid() {
+    if [ -n "$R" ]; then
+        # The tests' fake /proc
+        # shellcheck source=/dev/null
+        if [ -n "${SD_FAKEKILL:-}" ]; then . "$SD_FAKEKILL"; fake_kill "$1"; else rm -rf "${PROC:?}/$1"; fi
+    else
+        kill "$1" 2>/dev/null
+    fi
+}
+restart_dropbear() {
+    if [ ! -f "$SSHD_FLAG" ]; then
+        say "SSH is off in the Homebrew Channel, so the settings take effect when it's turned on."
+        return 0
+    fi
+    [ -x "$DROPBEAR" ] || die "The Homebrew Channel's SSH server ($DROPBEAR) is missing.  Reinstall the Homebrew Channel."
+    _want=$(ssh_ports)
+    for _x in $_want; do
+        _ow=$(port_owner "$_x")
+        if [ -n "$_ow" ] && [ "$_ow" != hbc ]; then
+            die "Port $_x is already used by another program ($_ow), so SSH wasn't moved there."
+        fi
+    done
+    for _m in $(hbc_masters); do kill_pid "$_m"; done
+    _i=0
+    while [ $_i -lt 10 ] && [ -n "$(hbc_masters)" ]; do sleep 0.3 2>/dev/null || sleep 1; _i=$((_i + 1)); done
+    mkdir -p "$HOSTKEYS"
+    # shellcheck disable=SC2046
+    "$DROPBEAR" $(dropbear_flags)
+    _i=0
+    while [ $_i -lt 20 ]; do
+        _ok=1
+        for _x in $_want; do listening "$_x" || _ok=0; done
+        [ $_ok = 1 ] && { say "Restarted the SSH server on port$( [ "${_want#* }" != "$_want" ] && printf 's') $(echo "$_want" | sed 's/ / and /')."; return 0; }
+        sleep 0.5 2>/dev/null || sleep 1; _i=$((_i + 1))
+    done
+    for _m in $(hbc_masters); do kill_pid "$_m"; done
+    "$DROPBEAR" -R
+    die "The SSH server didn't start with these settings, so it was started the usual way, on port 22."
+}
+
+# root's password through a bind-mounted copy of /etc/shadow (and /etc/passwd
+# when root's entry there is "*"), the way the Homebrew Channel does it
+shadow_with() {
+    mkdir -p "$RUN"
+    _src="$SHADOW"
+    if [ -z "${SD_NOMOUNT:-}" ] && grep -q ' /etc/shadow ' /proc/mounts 2>/dev/null; then
+        umount /etc/shadow 2>/dev/null
+    fi
+    sed -r 's|^root:[^:]*:|root:'"$1"':|' "$_src" > "$RUN/shadow"
+    chmod 400 "$RUN/shadow"
+    if [ -n "${SD_NOMOUNT:-}" ]; then
+        cat "$RUN/shadow" > "$SHADOW"
+    else
+        mount --bind "$RUN/shadow" "$SHADOW" || die "Couldn't change root's password."
+    fi
+    if grep -q '^root:\*:' "$PASSWD" 2>/dev/null; then
+        sed 's/^root:\*:/root:x:/' "$PASSWD" > "$RUN/passwd"
+        chmod 444 "$RUN/passwd"
+        if [ -n "${SD_NOMOUNT:-}" ]; then cat "$RUN/passwd" > "$PASSWD"; else mount --bind "$RUN/passwd" "$PASSWD"; fi
+    fi
+}
+# Back to what the Homebrew Channel does at boot: alpine if there's no keys
+# file, otherwise the TV's own shadow (no password)
+shadow_default() {
+    if [ -n "${SD_NOMOUNT:-}" ]; then
+        if [ -f "$AK" ]; then shadow_with '*'; else shadow_with "$ALPINE_HASH"; fi
+        return 0
+    fi
+    grep -q ' /etc/shadow ' /proc/mounts 2>/dev/null && umount /etc/shadow 2>/dev/null
+    [ -f "$AK" ] || shadow_with "$ALPINE_HASH"
+}
+
+# The startup hook: a copy of this script in $SDDIR, run by the Homebrew
+# Channel's run-parts after it starts SSH
+install_hook() {
+    mkdir -p "$SDDIR" "${HOOK%/*}" && chmod 700 "$SDDIR"
+    cp "$HERE/ssh-doctor.sh" "$SDDIR/ssh-doctor.sh"
+    cat > "$HOOK" <<'EOF'
+#!/bin/sh
+# Added by LG webOS SSH Doctor: puts its SSH settings back after a restart.
+# Remove them with Reset to defaults in the app, or: sh /var/lib/webosbrew/ssh-doctor/ssh-doctor.sh reset-settings
+S=/var/lib/webosbrew/ssh-doctor/ssh-doctor.sh
+[ -f "$S" ] && (sh "$S" boot < /dev/null > /var/lib/webosbrew/ssh-doctor/boot.log 2>&1 &)
+exit 0
+EOF
+    chmod 755 "$HOOK"
+}
+remove_hook() { rm -f "$HOOK" "$SDDIR/ssh-doctor.sh"; }
+
+# Save-and-use: the password, the hook, and dropbear's options
+apply() {
+    if [ -f "$PWHASH" ]; then shadow_with "$(cat "$PWHASH")"; fi
+    if customized; then install_hook; else remove_hook; fi
+    if settings_applied && [ "${1:-}" != force ]; then say "SSH already runs with these settings."; return 0; fi
+    restart_dropbear
+}
+
+# At boot, from the hook: wait for the Homebrew Channel's dropbear, then apply
+boot() {
+    _i=0
+    while [ $_i -lt 30 ] && [ -f "$SSHD_FLAG" ] && [ -z "$(hbc_masters)" ]; do sleep 1; _i=$((_i + 1)); done
+    [ -f "$FAILSAFE" ] && { say "Failsafe mode: settings not applied."; return 0; }
+    say "$(date): applying $(dropbear_flags)"
+    apply
+}
+
+settings_json() {
+    printf '{"port":%s,"trial":%s,"keysOnly":%s,"keepalive":%s,"password":%s,"hook":%s,"applied":%s,"flags":%s}' \
+        "$(ssh_port)" "$( [ -n "$(trial_port)" ] && trial_port || echo null)" \
+        "$(keys_only && echo true || echo false)" "$(keepalive && echo true || echo false)" \
+        "$([ -f "$PWHASH" ] && echo true || echo false)" "$([ -f "$HOOK" ] && echo true || echo false)" \
+        "$(settings_applied && echo true || echo false)" "$(js "$(running_flags)")"
+}
+
 # ------------------------------------------------------------------ status
 
 # Each finding is "code level" (level: problem, tip); the app words them
@@ -260,32 +542,55 @@ collect() {
     FIND=''
     add() { FIND="$FIND$1 $2
 "; }
+    _port=$(ssh_port)
+    _trial=$(trial_port)
     _flag=no; [ -f "$SSHD_FLAG" ] && _flag=yes
-    _run=no; dropbear_running && _run=yes
-    _listen=no; listening 22 && _listen=yes
+    _run=no; [ -n "$(hbc_masters)" ] && _run=yes
+    _owner=$(port_owner "$_port")
+    _listen=no; [ "$_owner" = hbc ] && _listen=yes
     _pw=$(password_state)
     _kp=$(key_problems | sed 's/ *$//')
     _kc=$(key_count)
     _pp=$(perm_problems)
     _tel=yes; [ -f "$TELNET_OFF" ] && _tel=no
     _telrun=no; telnet_running && _telrun=yes
+    _ko=no; keys_only && _ko=yes
+    _others=$(servers_list | awk '$2 != "hbc"' | wc -l | tr -d ' ')
+    _badpw=$(bad_logins_recent)
 
     [ -d "$HBC_SVC" ] || add hbc-missing problem
     [ -f "$FAILSAFE" ] && add failsafe problem
-    if [ "$_flag" = no ] && [ "$_listen" = no ]; then add ssh-off problem
+    if [ -n "$_owner" ] && [ "$_owner" != hbc ]; then add port-taken problem
+    elif [ "$_flag" = no ] && [ "$_listen" = no ]; then add ssh-off problem
     elif [ "$_flag" = yes ] && [ "$_listen" = no ]; then add ssh-not-running problem
     elif [ "$_flag" = no ] && [ "$_listen" = yes ]; then add ssh-off-next-boot tip
     fi
     # Locked out: keys only, and none of them usable
-    if [ "$_pw" != alpine ] && [ "$_pw" != set ] && [ "$_kc" = 0 ]; then
-        if [ -f "$AK" ]; then add no-way-in problem; else add no-password problem; fi
+    if [ "$_kc" = 0 ]; then
+        if [ "$_ko" = yes ]; then add keys-only-no-keys problem
+        elif [ "$_pw" != alpine ] && [ "$_pw" != set ]; then
+            if [ -f "$AK" ]; then add no-way-in problem; else add no-password problem; fi
+        fi
     fi
     case " $_kp " in *" private "*) add keys-private problem ;; esac
     case " $_kp " in *" crlf "*|*" bom "*|*" wrapped "*|*" putty "*) add keys-fixable problem ;; esac
     case " $_kp " in *" bad "*|*" broken "*) add keys-bad problem ;; esac
     [ -n "$_pp" ] && add perms problem
-    [ "$_pw" = alpine ] && add password-default tip
+    hostkeys_broken && add hostkey-broken problem
+    if [ "$_listen" = yes ] && ! settings_applied; then add settings-not-applied problem; fi
+    [ -n "$_trial" ] && add port-trial tip
+    [ "$_pw" = alpine ] && [ "$_ko" = no ] && add password-default tip
+    [ "${_badpw:-0}" -ge 5 ] 2>/dev/null && add failed-logins tip
+    [ "$_others" != 0 ] && add other-ssh tip
     [ "$_tel" = no ] && add telnet-off tip
+}
+
+# Empty host key files stop dropbear from starting
+hostkeys_broken() {
+    for _h in "$HOSTKEYS"/dropbear_*_host_key; do
+        [ -e "$_h" ] && [ ! -s "$_h" ] && return 0
+    done
+    return 1
 }
 
 status_json() {
@@ -304,6 +609,10 @@ status_json() {
         "$([ "$_tel" = yes ] && echo true || echo false)" \
         "$([ "$_telrun" = yes ] && echo true || echo false)"
     printf '"failsafe":%s,' "$([ -f "$FAILSAFE" ] && echo true || echo false)"
+    printf '"port":%s,"portOwner":%s,"keysOnly":%s,"sftp":%s,"failedLogins":%s,' "$_port" "$(js "$_owner")" \
+        "$([ "$_ko" = yes ] && echo true || echo false)" "$([ -x "$SFTP_SERVER" ] && echo true || echo false)" "${_badpw:-0}"
+    printf '"settings":%s,"servers":%s,' "$(settings_json)" "$(servers_json)"
+    printf '"sessions":{"%s":%s%s},' "$_port" "$(sessions_on "$_port")" "$([ -n "$_trial" ] && printf ',"%s":%s' "$_trial" "$(sessions_on "$_trial")")"
     printf '"legacyRsa":%s,' "$(legacy_rsa "$_ver" && echo true || echo false)"
     printf '"ips":['
     _f=1
@@ -338,7 +647,9 @@ status_text() {
     collect
     say "LG webOS SSH Doctor $VERSION"
     say "SSH switch in the Homebrew Channel: $_flag"
-    say "SSH server running: $_run, listening on port 22: $_listen"
+    say "SSH server running: $_run, listening on port $_port: $_listen${_trial:+ (and $_trial until you keep the new port)}"
+    say "Settings: $(dropbear_flags)$([ -f "$PWHASH" ] && printf ', your own password')"
+    servers_list | while read -r _p _k _c _ps; do say "SSH server: $_c ($_k), pid $_p, port ${_ps:-none}"; done
     say "Password login: $_pw"
     say "Usable keys in $AK: ${_kc:-0}${_kp:+ (found: $_kp)}"
     [ -n "$_pp" ] && say "Permissions to fix: $_pp"
@@ -380,14 +691,23 @@ ssh_on() {
     if [ ! -f "$SSHD_FLAG" ]; then
         : > "$SSHD_FLAG" && say "Turned SSH on in the Homebrew Channel's settings."
     fi
-    if listening 22; then say "The SSH server is already running."; return 0; fi
+    _sp=$(ssh_port)
+    if [ "$(port_owner "$_sp")" = hbc ]; then say "The SSH server is already running."; return 0; fi
     [ -x "$DROPBEAR" ] || die "The Homebrew Channel's SSH server ($DROPBEAR) is missing.  Reinstall the Homebrew Channel."
-    # Started the same way the Homebrew Channel's startup script does
+    _ow=$(port_owner "$_sp")
+    [ -z "$_ow" ] || die "Port $_sp is already used by another program ($_ow), so SSH can't start there."
+    if hostkeys_broken; then
+        for _h in "$HOSTKEYS"/dropbear_*_host_key; do [ -s "$_h" ] || rm -f "$_h"; done
+        say "Removed empty host key files, so new ones are made."
+    fi
+    # Started the same way the Homebrew Channel's startup script does, plus
+    # any settings made here
     mkdir -p "$HOSTKEYS"
-    "$DROPBEAR" -R
+    # shellcheck disable=SC2046
+    "$DROPBEAR" $(dropbear_flags)
     _i=0
     while [ $_i -lt 10 ]; do
-        listening 22 && { say "Started the SSH server on port 22."; return 0; }
+        listening "$_sp" && { say "Started the SSH server on port $_sp."; return 0; }
         sleep 1; _i=$((_i + 1))
     done
     die "The SSH server didn't start.  Restart the TV, then check again."
@@ -418,26 +738,20 @@ fix_keys() {
 }
 
 # Like the Homebrew Channel's startup script: root's password becomes alpine
-# through a bind mount, so /etc stays untouched
+# through a bind mount, so /etc stays untouched.  For anyone locked out, so it
+# also drops a password of their own and keys-only login.
 password_on() {
     if [ -f "$AK" ]; then
         _off="$AK.ssh-doctor-off-$(stamp)"
         mv "$AK" "$_off" && say "Set the keys file aside as $_off"
     fi
-    if [ "$(password_state)" = alpine ]; then say "Password login is on: user root, password alpine."; return 0; fi
-    mkdir -p "$RUN"
-    sed -r 's/^root:[^:]*:/root:'"$ALPINE_HASH"':/' "$SHADOW" > "$RUN/shadow"
-    chmod 400 "$RUN/shadow"
-    if [ -n "${SD_NOMOUNT:-}" ]; then
-        cat "$RUN/shadow" > "$SHADOW"
-    else
-        grep -q ' /etc/shadow ' /proc/mounts 2>/dev/null && umount /etc/shadow 2>/dev/null
-        mount --bind "$RUN/shadow" "$SHADOW" || die "Couldn't turn the password on."
-    fi
-    if grep -q '^root:\*:' "$PASSWD" 2>/dev/null; then
-        sed 's/^root:\*:/root:x:/' "$PASSWD" > "$RUN/passwd"
-        chmod 444 "$RUN/passwd"
-        if [ -n "${SD_NOMOUNT:-}" ]; then cat "$RUN/passwd" > "$PASSWD"; else mount --bind "$RUN/passwd" "$PASSWD"; fi
+    _was=no
+    [ -f "$PWHASH" ] && { rm -f "$PWHASH"; _was=yes; }
+    keys_only && { conf_set KEYSONLY ''; _was=yes; }
+    if [ "$(password_state)" != alpine ]; then shadow_with "$ALPINE_HASH"; fi
+    if [ $_was = yes ]; then
+        if customized; then install_hook; else remove_hook; fi
+        restart_dropbear > /dev/null 2>&1
     fi
     say "Password login is on: user root, password alpine.  It stays on after a restart until a key is added."
 }
@@ -486,6 +800,23 @@ keys_list() {
     rm -f "$RUN/list"
 }
 
+# key-remove FP, key-rename FP NAME: by fingerprint, with a backup first
+key_edit() {
+    [ -f "$AK" ] || die "There's no keys file."
+    _n=$(find_node)
+    [ -n "$_n" ] || die "This needs Node.js."
+    mkdir -p "$RUN"
+    "$_n" "$HERE/keyinfo.js" edit "$AK" "$@" > "$RUN/ak.new" || { rm -f "$RUN/ak.new"; die "No key with that fingerprint."; }
+    if [ "$1" = remove ] && [ "$(grep -c -v '^#' "$RUN/ak.new" | tr -d ' ')" = 0 ] && keys_only; then
+        rm -f "$RUN/ak.new"; die "That's the last key and keys only is on, so nobody could log in.  Turn keys only off first."
+    fi
+    backup "$AK"
+    cat "$RUN/ak.new" > "$AK"
+    rm -f "$RUN/ak.new"
+    fix_perms
+    if [ "$1" = remove ]; then say "Removed the key."; else say "Renamed the key."; fi
+}
+
 backups() {
     for f in "$SSH_DIR"/authorized_keys.ssh-doctor-*; do
         [ -f "$f" ] && say "${f##*/}"
@@ -501,6 +832,228 @@ restore() {
     cp "$SSH_DIR/$1" "$AK"
     fix_perms
     say "Put $1 back as authorized_keys."
+}
+
+# ------------------------------------------------------------------ SSH settings
+
+# A SHA-512 crypt hash, made by the app or the pairing page (the password
+# itself never reaches this script)
+set_password() {
+    # shellcheck disable=SC2016
+    printf '%s' "$1" | grep -Eq '^\$6\$(rounds=[0-9]{4,9}\$)?[./0-9A-Za-z]{1,16}\$[./0-9A-Za-z]{86}$' ||
+        die "That isn't a password hash this script takes."
+    mkdir -p "$SDDIR" && chmod 700 "$SDDIR"
+    printf '%s\n' "$1" > "$PWHASH.tmp" && chmod 600 "$PWHASH.tmp" && mv "$PWHASH.tmp" "$PWHASH"
+    shadow_with "$1"
+    install_hook
+    say "Set root's password.  Log in as root with it from now on, also after a restart."
+    keys_only && say "Keys only is on, so the password works again once you turn that off."
+    return 0
+}
+
+clear_password() {
+    [ -f "$PWHASH" ] || { say "There's no password of your own to remove."; return 0; }
+    rm -f "$PWHASH"
+    shadow_default
+    if customized; then install_hook; else remove_hook; fi
+    if [ -f "$AK" ]; then say "Removed your password.  Only keys log in now, as the Homebrew Channel does when there's a keys file."
+    else say "Removed your password.  With no keys file, the Homebrew Channel's alpine password is back."; fi
+}
+
+set_keys_only() {
+    case "$1" in
+        on)
+            [ "$(key_count)" != 0 ] || die "Add a key first: with keys only and no key, nobody could log in."
+            conf_set KEYSONLY 1; apply
+            say "Keys only is on: passwords don't log in any more." ;;
+        off) conf_set KEYSONLY ''; apply; say "Keys only is off: passwords work again." ;;
+        *) die "Use on or off." ;;
+    esac
+}
+
+set_keepalive() {
+    case "$1" in
+        on) conf_set KEEPALIVE 1; apply; say "Idle sessions stay connected now." ;;
+        off) conf_set KEEPALIVE ''; apply; say "Keepalive is off." ;;
+        *) die "Use on or off." ;;
+    esac
+}
+
+set_port() {
+    _np=$1
+    case "$_np" in ''|*[!0-9]*) die "A port is a number." ;; esac
+    _np=$((_np + 0))
+    [ "$_np" = 22 ] || { [ "$_np" -ge 1024 ] && [ "$_np" -le 65535 ]; } || die "Pick 22, or a port from 1024 to 65535."
+    [ "$_np" = 23 ] && die "Port 23 is telnet's."
+    [ "$_np" -ge 28622 ] && [ "$_np" -le 28631 ] && die "Ports 28622 to 28631 are the pairing page's."
+    _op=$(ssh_port)
+    [ "$_np" = "$_op" ] && { say "SSH already uses port $_np."; return 0; }
+    _ow=$(port_owner "$_np")
+    [ -z "$_ow" ] || die "Port $_np is already used by another program ($_ow)."
+    _keep=$(trial_port)
+    [ -n "$_keep" ] || _keep=$_op
+    [ "$_keep" = "$_np" ] && _keep=''
+    conf_set PORT "$([ "$_np" = 22 ] || echo "$_np")"
+    conf_set TRIAL "$_keep"
+    if (apply); then
+        [ -n "$_keep" ] && say "SSH now answers on port $_np too.  Port $_keep stays open until you log in on $_np and keep it."
+        return 0
+    fi
+    # Didn't start there: back to how it was
+    conf_set PORT "$([ "$_op" = 22 ] && echo '' || echo "$_op")"
+    conf_set TRIAL "$([ "$_keep" = "$_op" ] && echo '' || echo "$_keep")"
+    (apply force) > /dev/null 2>&1
+    die "SSH stays on port $_op."
+}
+
+port_keep() {
+    _t=$(trial_port)
+    [ -n "$_t" ] || { say "There's no port change to keep."; return 0; }
+    conf_set TRIAL ''
+    apply
+    say "Kept port $(ssh_port).  Port $_t is closed."
+}
+
+port_revert() {
+    _t=$(trial_port)
+    [ -n "$_t" ] || { say "There's no port change to undo."; return 0; }
+    conf_set PORT "$([ "$_t" = 22 ] && echo '' || echo "$_t")"
+    conf_set TRIAL ''
+    apply
+    say "SSH is back on port $(ssh_port)."
+}
+
+reset_settings() {
+    rm -f "$CONF" "$PWHASH"
+    shadow_default
+    remove_hook
+    rm -f "$SDDIR/boot.log"
+    rmdir "$SDDIR" 2>/dev/null
+    if [ -f "$SSHD_FLAG" ] && [ "$(running_flags)" != "-R" ]; then restart_dropbear > /dev/null 2>&1; fi
+    say "Removed every SSH setting.  SSH runs the Homebrew Channel's way again: port 22, its usual password and key rules."
+}
+
+# ------------------------------------------------------------------ logins
+#
+# dropbear writes to webOS's system log (/tmp/var/log/legacy-log, a few hours
+# of it with the rotated .gz files):
+#   Pubkey auth succeeded for 'root' with ssh-ed25519 key SHA256:... from IP:PORT
+#   Password auth succeeded for 'root' from IP:PORT
+#   Bad password attempt for 'root' from IP:PORT
+#   Login attempt for nonexistent user from IP:PORT
+
+log_lines() {
+    for _n in 9 8 7 6 5 4 3 2 1 0; do
+        [ -f "$LOGDIR/legacy-log.$_n.gz" ] && gunzip -c "$LOGDIR/legacy-log.$_n.gz" 2>/dev/null | grep ' dropbear\['
+    done
+    [ -f "$LOGDIR/legacy-log" ] && grep ' dropbear\[' "$LOGDIR/legacy-log"
+    return 0
+}
+
+# Failed tries in the current log
+bad_logins_recent() {
+    [ -f "$LOGDIR/legacy-log" ] || { say 0; return; }
+    grep -c -E 'dropbear\[[0-9]+\].* (Bad password attempt|Login attempt for nonexistent user)' "$LOGDIR/legacy-log"
+}
+
+logins() {
+    log_lines | awk -v J="${1:-}" '
+    function jq(s) { gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); return "\"" s "\"" }
+    function ipof(s) { gsub(/[<>]/, "", s); sub(/:[0-9]+$/, "", s); return s }
+    {
+        t = $1; kind = ""; user = ""; fp = ""; ip = ""
+        if (match($0, /Pubkey auth succeeded for .* key SHA256:[^ ]+ from [^ ]+/)) {
+            kind = "key"; m = substr($0, RSTART, RLENGTH)
+            fp = m; sub(/^.* key /, "", fp); sub(/ from .*/, "", fp)
+            ip = m; sub(/^.* from /, "", ip)
+        } else if (match($0, /Password auth succeeded for .* from [^ ]+/)) {
+            kind = "password"; m = substr($0, RSTART, RLENGTH); ip = m; sub(/^.* from /, "", ip)
+        } else if (match($0, /Bad password attempt for .* from [^ ]+/)) {
+            kind = "bad-password"; m = substr($0, RSTART, RLENGTH); ip = m; sub(/^.* from /, "", ip)
+        } else if (match($0, /Login attempt for nonexistent user from [^ ]+/)) {
+            kind = "bad-user"; m = substr($0, RSTART, RLENGTH); ip = m; sub(/^.* from /, "", ip)
+        } else next
+        if (kind != "bad-user" && match(m, /for \047[^\047]*\047/)) { user = substr(m, RSTART + 5, RLENGTH - 6) }
+        ip = ipof(ip)
+        n++; T[n] = t; K[n] = kind; U[n] = user; F[n] = fp; I[n] = ip
+        if (kind ~ /^bad/) { bad++; badip[ip]++ } else ok++
+        if (n == 1) first = t
+    }
+    END {
+        if (J != "--json") {
+            for (i = (n > 30 ? n - 29 : 1); i <= n; i++) print T[i], K[i], U[i], I[i], F[i]
+            printf "%d logins, %d failed tries since %s\n", ok, bad, (first == "" ? "the log started" : first)
+            exit
+        }
+        printf "{\"ok\":%d,\"failed\":%d,\"since\":%s,\"events\":[", ok, bad, jq(first)
+        c = 0
+        for (i = n; i >= 1 && c < 30; i--) {
+            printf "%s{\"t\":%s,\"kind\":%s,\"user\":%s,\"ip\":%s,\"fp\":%s}", (c ? "," : ""), jq(T[i]), jq(K[i]), jq(U[i]), jq(I[i]), jq(F[i]); c++
+        }
+        printf "],\"failedFrom\":["
+        c = 0
+        for (a in badip) { printf "%s{\"ip\":%s,\"n\":%d}", (c ? "," : ""), jq(a), badip[a]; c++ }
+        printf "],\"lastUsed\":{"
+        c = 0
+        for (i = n; i >= 1; i--) if (K[i] == "key" && !(F[i] in seen)) { seen[F[i]] = 1; printf "%s%s:%s", (c ? "," : ""), jq(F[i]), jq(T[i]); c++ }
+        printf "}}\n"
+    }'
+}
+
+# ------------------------------------------------------------------ host keys
+
+hostkeys_cmd() {
+    _n=$(find_node)
+    [ -n "$_n" ] || die "This needs Node.js."
+    "$_n" "$HERE/keyinfo.js" hostpub "$HOSTKEYS" ${1:+"$1"}
+}
+
+hostkeys_reset() {
+    [ -d "$HOSTKEYS" ] || mkdir -p "$HOSTKEYS"
+    _bk="$HOSTKEYS.ssh-doctor-$(stamp)"
+    cp -a "$HOSTKEYS" "$_bk" && say "Backed up the TV's SSH keys to $_bk"
+    rm -f "$HOSTKEYS"/dropbear_*_host_key
+    restart_dropbear > /dev/null 2>&1 || ssh_on > /dev/null 2>&1
+    say "Removed the TV's SSH keys.  New ones are made at the next login, so computers that logged in before will warn REMOTE HOST IDENTIFICATION HAS CHANGED once."
+}
+
+# ------------------------------------------------------------------ telnet
+
+telnet_off() {
+    if [ "$(key_count)" = 0 ] && { keys_only || { [ "$(password_state)" != alpine ] && [ "$(password_state)" != set ]; }; }; then
+        die "Set up SSH first: telnet is the way back in while nobody can log in over SSH."
+    fi
+    mkdir -p "$PREFS"
+    : > "$TELNET_OFF"
+    server_pids | awk '$2 == "telnetd" { print $1 }' | while read -r _t; do kill_pid "$_t"; done
+    say "Turned telnet off, now and after restarts.  This app can still fix SSH if it breaks."
+}
+
+telnet_on() {
+    rm -f "$TELNET_OFF"
+    if telnet_running; then say "Telnet is on."; return 0; fi
+    [ -x "$TELNETD" ] || die "The Homebrew Channel's telnet server is missing."
+    "$TELNETD" -l /bin/sh
+    say "Turned telnet on, on port 23 (no password, like the Homebrew Channel's)."
+}
+
+# ------------------------------------------------------------------ report
+
+# For a GitHub issue or a forum post: no IP addresses, no keys, no names
+report() {
+    collect
+    say "LG webOS SSH Doctor $VERSION report"
+    say "webOS: $(sed -n 's/.*"core_os_release" *: *"\([^"]*\)".*/\1/p' "$R/var/run/nyx/os_info.json" 2>/dev/null | head -n 1)"
+    say "Kernel: $(uname -r 2>/dev/null)"
+    say "Homebrew Channel: $([ -d "$HBC_SVC" ] && echo installed || echo missing), SSH switch $_flag, telnet $_tel, failsafe $([ -f "$FAILSAFE" ] && echo yes || echo no)"
+    say "dropbear: $(dropbear_version), running $_run, port $_port$([ -n "$_trial" ] && printf ' (+%s)' "$_trial"), owner ${_owner:-nobody}"
+    say "Options: wanted $(dropbear_flags), running $(running_flags)"
+    say "Login: password $_pw, keys $_kc, keys only $_ko, key file problems: ${_kp:-none}, permission problems: ${_pp:-none}"
+    say "Host keys: $(for _h in "$HOSTKEYS"/dropbear_*_host_key; do [ -e "$_h" ] && printf '%s(%s) ' "$(basename "$_h" | sed 's/dropbear_//; s/_host_key//')" "$(wc -c < "$_h" | tr -d ' ')"; done)"
+    say "sftp-server: $([ -x "$SFTP_SERVER" ] && echo yes || echo no), node: $([ -n "$(find_node)" ] && echo yes || echo no)"
+    servers_list | while read -r _p _k _c _ps; do say "Server: $_c $_k ports ${_ps:-none}"; done
+    say "Findings: $(printf '%s' "$FIND" | awk '{ printf "%s ", $1 }')"
+    say "Logins in the log: $(logins | tail -n 1 | sed 's/ since .*//')"
 }
 
 # ------------------------------------------------------------------ pairing
@@ -524,12 +1077,19 @@ pair_stop() {
 }
 
 pair_start() {
+    _purpose=${1:-key}
+    case "$_purpose" in key|password) ;; *) die '{"error":"bad-purpose"}' ;; esac
     _n=$(find_node)
     [ -n "$_n" ] || die '{"error":"no-node"}'
     pair_stop > /dev/null
     mkdir -p "$PAIR"
     chmod 700 "$PAIR"
     : > "$PAIR/alive"
+    # What the page shows once paired: how to log in, and the TV's host keys
+    # for known_hosts
+    printf '{"purpose":%s,"port":%s,"legacyRsa":%s,"hostKeys":%s}\n' "$(js "$_purpose")" "$(ssh_port)" \
+        "$(legacy_rsa "$(dropbear_version)" && echo true || echo false)" \
+        "$("$_n" "$HERE/keyinfo.js" hostpub "$HOSTKEYS" --json 2>/dev/null || echo '[]')" > "$PAIR/info.json"
     if command -v setsid >/dev/null 2>&1; then
         setsid "$_n" "$HERE/pair-server.js" "$PAIR" "$PAIR_PORT" "$(ips)" < /dev/null > "$PAIR/log" 2>&1 &
     else
@@ -561,6 +1121,12 @@ pair_status() {
 
 pair_accept() {
     grep -q '"state":"pending"' "$PAIR/state.json" 2>/dev/null || die '{"error":"nothing-pending"}'
+    if [ -f "$PAIR/pending.hash" ]; then
+        if set_password "$(cat "$PAIR/pending.hash")" > "$PAIR/added" 2>&1; then
+            say accepted > "$PAIR/decision"; cat "$PAIR/added"; return 0
+        fi
+        say failed > "$PAIR/decision"; cat "$PAIR/added" >&2; return 1
+    fi
     if add_key "$PAIR/pending.pub" > "$PAIR/added" 2>&1; then
         say accepted > "$PAIR/decision"
         cat "$PAIR/added"
@@ -590,12 +1156,32 @@ case "$CMD" in
     keys) keys_list "${1:-}" ;;
     backups) backups ;;
     restore) restore "${1:-}" ;;
-    pair-start) pair_start ;;
+    pair-start) pair_start "${1:-key}" ;;
     pair-status) pair_status ;;
     pair-accept) pair_accept ;;
     pair-reject) pair_reject ;;
     pair-stop) pair_stop ;;
+    key-remove) key_edit remove "${1:-}" ;;
+    key-rename) key_edit rename "${1:-}" "${2:-}" ;;
+    servers) if [ "${1:-}" = --json ]; then servers_json; echo; else servers_list; fi ;;
+    settings) if [ "${1:-}" = --json ]; then settings_json; echo; else say "$(dropbear_flags)"; fi ;;
+    set-password) set_password "${1:-}" ;;
+    clear-password) clear_password ;;
+    set-keys-only) set_keys_only "${1:-}" ;;
+    set-keepalive) set_keepalive "${1:-}" ;;
+    set-port) set_port "${1:-}" ;;
+    port-keep) port_keep ;;
+    port-revert) port_revert ;;
+    reset-settings) reset_settings ;;
+    apply) apply force ;;
+    boot) boot ;;
+    logins) logins "${1:-}" ;;
+    hostkeys) hostkeys_cmd "${1:-}" ;;
+    hostkeys-reset) hostkeys_reset ;;
+    telnet-off) telnet_off ;;
+    telnet-on) telnet_on ;;
+    report) report ;;
     version) say "$VERSION" ;;
-    -h|--help|help) sed -n '2,24s/^# \{0,1\}//p' "$0" ;;
+    -h|--help|help) sed -n '2,39s/^# \{0,1\}//p' "$0" ;;
     *) die "Unknown command: $CMD (try: sh $0 help)" ;;
 esac

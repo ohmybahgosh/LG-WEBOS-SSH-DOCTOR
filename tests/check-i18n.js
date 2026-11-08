@@ -18,7 +18,7 @@ box.window.localStorage = { getItem: function () { return null; }, setItem: func
 vm.runInNewContext(fs.readFileSync(path.join(SRC, 'i18n.js'), 'utf8'), box);
 var I = box.window.SD_I18N;
 
-function unq(s) { return s.replace(/\\'/g, "'"); }
+function unq(s) { return s.replace(/\\'/g, "'").replace(/\\n/g, '\n'); }
 var used = {};
 var m;
 var lit = /\bTC?\(\s*'((?:[^'\\]|\\.)*)'/g;
@@ -66,7 +66,10 @@ REPAIRS.forEach(function (fn) {
 });
 function fill(t) {
     return t.replace(/\$\{_found:-[^}]*\}/g, 'crlf bom').replace(/\$\(stamp\)/g, '20261108-120000')
-        .replace(/\$\{?[A-Za-z_][A-Za-z_0-9]*\}?/g, function (v) { return /_n\b|_n\}/.test(v) ? '2' : '/home/root/.ssh/authorized_keys'; })
+        .replace(/\$\{?[A-Za-z_][A-Za-z_0-9]*\}?/g, function (v) {
+            if (/_n\b|_n\}|_sp\b/.test(v)) { return /_sp/.test(v) ? '2222' : '2'; }
+            return /_ow\b/.test(v) ? 'entware-openssh' : '/home/root/.ssh/authorized_keys';
+        })
         .replace(/\\"/g, '"');
 }
 var smallWords = /\b(the|is|are|was|it|this|that|and|but|or|to|of|on|in|with|your|for|has|have|isn't|didn't|couldn't|can|now|already|there|after|only|until|back|key|keys)\b/i;

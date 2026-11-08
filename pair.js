@@ -2,6 +2,8 @@
  * The pairing page's script.  It only talks to the TV it came from.  A key it
  * makes is an ed25519 pair made here with tweetnacl and this browser's random
  * numbers: the private key is saved as a file on this device and never sent.
+ * A password is turned into a SHA-512 crypt hash here, and only the hash is
+ * sent.
  */
 (function () {
     'use strict';
@@ -24,7 +26,7 @@
 
     function $(id) { return document.getElementById(id); }
     function show(id) {
-        ['step-code', 'step-key', 'step-confirm', 'step-done', 'step-end'].forEach(function (s) { $(s).className = s === id ? (s === 'step-key' ? '' : 'card') : 'hidden'; });
+        ['step-code', 'step-key', 'step-password', 'step-confirm', 'step-done', 'step-end'].forEach(function (s) { $(s).className = s === id ? (s === 'step-key' ? '' : 'card') : 'hidden'; });
         if (id === 'step-key') { $(id).className = ''; }
     }
     function text(id, t, cls) { var e = $(id); e.textContent = t; if (cls) { e.className = cls; } }
@@ -33,6 +35,8 @@
     var token = null;
     var made = null;        // { priv, pub, file } when this page made the key
     var keyType = '';
+    var info = { purpose: 'key', port: 22, legacyRsa: false, hostKeys: [] };
+    function portOpt() { return info.port && info.port !== 22 ? '-p ' + info.port + ' ' : ''; }
 
     function api(method, url, data, cb) {
         var x = new XMLHttpRequest();
@@ -64,7 +68,9 @@
         'one-key': 'Send one key at a time.',
         'empty': 'Pick a file or paste a key first.',
         'not-a-key': 'That doesn\'t look like a public key.  It should start with ssh-ed25519, ssh-rsa or ecdsa-sha2.',
-        'not-paired': 'This page has timed out.  Open Set up a key on the TV again to start over.'
+        'not-paired': 'This page has timed out.  Open Set up a key on the TV again to start over.',
+        'not-a-hash': 'The TV didn\'t take that password.  Try again.',
+        'wrong-purpose': 'The TV is waiting for something else.  Start over on the TV.'
     };
     function errText(r) {
         return T(ERRORS[r.error] || 'Something went wrong ({e}).', { n: r.triesLeft, e: r.error });
@@ -86,7 +92,12 @@
         $('code-go').disabled = true;
         api('POST', '/api/code', { code: c }, function (status, r) {
             $('code-go').disabled = false;
-            if (r.ok && r.token) { token = r.token; show('step-key'); return; }
+            if (r.ok && r.token) {
+                token = r.token;
+                if (r.info) { info = r.info; }
+                if (info.purpose === 'password') { show('step-password'); $('pw1').focus(); } else { show('step-key'); }
+                return;
+            }
             if (r.error === 'new-code') { codeEl.value = ''; }
             if (r.error === 'locked' || r.error === 'busy') { endWith(T('Start over on the TV'), errText(r)); return; }
             text('code-msg', errText(r));
@@ -150,13 +161,55 @@
         });
     }
 
+    // ------------------------------------------------------------ step 2, password
+
+    $('pw-show').addEventListener('change', function () {
+        var t = $('pw-show').checked ? 'text' : 'password';
+        $('pw1').type = t; $('pw2').type = t;
+    });
+    $('pw2').addEventListener('keydown', function (e) { if (e.keyCode === 13) { sendPassword(); } });
+    $('pw-go').addEventListener('click', sendPassword);
+
+    function sendPassword() {
+        var a = $('pw1').value, b = $('pw2').value;
+        if (a.length < 8) { text('pw-msg', T('Use at least 8 characters.')); return; }
+        if (a !== b) { text('pw-msg', T('The two passwords are different.')); return; }
+        if (/^alpine$/i.test(a) || /^(password|12345678|123456789|qwertyui)$/i.test(a)) { text('pw-msg', T('Pick a password that\'s harder to guess.')); return; }
+        if (!window.SD_SHA512CRYPT || !window.nacl) { text('pw-msg', T('This browser can\'t do this.  Try another browser.')); return; }
+        $('pw-go').disabled = true;
+        text('pw-msg', T('Scrambling the password…'), 'dim');
+        setTimeout(function () {
+            var h;
+            try { h = window.SD_SHA512CRYPT.hash(a); } catch (e) { $('pw-go').disabled = false; text('pw-msg', T('This browser can\'t do this.  Try another browser.'), 'err'); return; }
+            $('pw1').value = ''; $('pw2').value = '';
+            api('POST', '/api/password', { token: token, hash: h }, function (status, r) {
+                $('pw-go').disabled = false;
+                if (!r.ok) {
+                    if (r.error === 'not-paired' || r.error === 'busy' || r.error === 'wrong-purpose') { endWith(T('Start over on the TV'), errText(r)); return; }
+                    text('pw-msg', errText(r), 'err');
+                    return;
+                }
+                text('confirm-intro', T('Your TV is asking whether to set this password.  Press OK on the remote.'));
+                text('fp', '');
+                show('step-confirm');
+                poll();
+            });
+        }, 30);
+    }
+
     // ------------------------------------------------------------ step 3
 
     function poll() {
         api('GET', '/api/status?token=' + encodeURIComponent(token), null, function (status, r) {
             if (r.state === 'accepted') { done(); return; }
-            if (r.state === 'rejected') { endWith(T('Not added'), T('The key was turned down on the TV.  Nothing changed.')); return; }
-            if (r.state === 'failed') { endWith(T('Not added'), T('The TV couldn\'t add the key.  Check the SSH Doctor screen on the TV.')); return; }
+            if (r.state === 'rejected') {
+                endWith(T('Not changed'), info.purpose === 'password' ? T('The password was turned down on the TV.  Nothing changed.') : T('The key was turned down on the TV.  Nothing changed.'));
+                return;
+            }
+            if (r.state === 'failed') {
+                endWith(T('Not changed'), info.purpose === 'password' ? T('The TV couldn\'t set the password.  Check the SSH Doctor screen on the TV.') : T('The TV couldn\'t add the key.  Check the SSH Doctor screen on the TV.'));
+                return;
+            }
             if (r.state === 'expired' || r.state === 'stopped' || r.error) {
                 endWith(T('Start over on the TV'), T('The pairing screen closed before the key was confirmed.  Nothing changed.'));
                 return;
@@ -167,35 +220,48 @@
 
     // ------------------------------------------------------------ step 4
 
+    function esc(x) { return String(x).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+    function pre(x) { return '<pre>' + esc(x) + '</pre>'; }
+    function p(x) { return '<p>' + esc(x) + '</p>'; }
+    var legacyOpts = function () { return info.legacyRsa ? '-o HostKeyAlgorithms=+ssh-rsa -o PubkeyAcceptedAlgorithms=+ssh-rsa ' : ''; };
+
     function howto(os) {
-        var host = HOST, f = made ? made.file : '';
+        var host = HOST, f = made ? made.file : '', port = info.port || 22, pw = info.purpose === 'password';
+        var cmd = 'ssh ' + legacyOpts() + portOpt();
         var h = '';
-        function pre(s) { return '<pre>' + s.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</pre>'; }
-        function p(s) { return '<p>' + s.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</p>'; }
         if (os === 'unix') {
             if (made) {
                 h += p(T('In Terminal, make the key private (ssh refuses it otherwise), then log in:'));
-                h += pre('chmod 600 ~/Downloads/' + f + '\nssh -i ~/Downloads/' + f + ' root@' + host);
+                h += pre('chmod 600 ~/Downloads/' + f + '\n' + cmd + '-i ~/Downloads/' + f + ' root@' + host);
                 h += p(T('To keep it, move it to ~/.ssh/ and use that path instead.'));
             } else {
                 h += p(T('In Terminal:'));
-                h += pre('ssh root@' + host);
+                h += pre(cmd + 'root@' + host);
             }
         } else if (os === 'win') {
             if (made) {
                 h += p(T('In PowerShell, make the key readable only by you (Windows ssh refuses it otherwise), then log in:'));
-                h += pre('icacls "$HOME\\Downloads\\' + f + '" /inheritance:r /grant:r "$($env:USERNAME):R"\nssh -i "$HOME\\Downloads\\' + f + '" root@' + host);
+                h += pre('icacls "$HOME\\Downloads\\' + f + '" /inheritance:r /grant:r "$($env:USERNAME):R"\n' + cmd + '-i "$HOME\\Downloads\\' + f + '" root@' + host);
             } else {
                 h += p(T('In PowerShell or Command Prompt:'));
-                h += pre('ssh root@' + host);
+                h += pre(cmd + 'root@' + host);
             }
+            h += p(T('For a Windows Terminal tab that opens the TV, add this to the profiles list in its settings.json (after the config below is in place):'));
+            h += pre('{ "name": "LG TV", "commandline": "ssh lgtv" }');
         } else if (os === 'putty') {
             if (made) {
                 h += p(T('PuTTY needs its own key format.  Open PuTTYgen, choose Load, pick {file} (show All files), then Save private key as {file}.ppk.', { file: f }));
             }
-            h += p(T('In PuTTY, enter {host} on port 22.  Under Connection, SSH, Auth, Credentials, choose your .ppk file.  Log in as root.', { host: host }));
+            h += p(pw ? T('In PuTTY, enter {host} on port {port}.  Log in as root with your password.', { host: host, port: port })
+                : T('In PuTTY, enter {host} on port {port}.  Under Connection, SSH, Auth, Credentials, choose your .ppk file.  Log in as root.', { host: host, port: port }));
+        } else if (os === 'files') {
+            h += p(T('Your TV can send and receive files over SFTP.  In WinSCP, FileZilla or Cyberduck, choose SFTP, then:'));
+            h += pre(T('Host: {host}\nPort: {port}\nUser: root', { host: host, port: port }));
+            if (!pw) { h += p(T('Pick your key file as the private key (WinSCP and FileZilla offer to convert it).')); }
+            h += p(T('Or from a terminal:'));
+            h += pre('scp ' + (port !== 22 ? '-P ' + port + ' ' : '') + (made ? '-i ' + f + ' ' : '') + 'myfile.txt root@' + host + ':/home/root/');
         } else {
-            h += p(T('In an SSH app like Termius, add a host: {host}, port 22, user root.', { host: host }));
+            h += p(T('In an SSH app like Termius, add a host: {host}, port {port}, user root.', { host: host, port: port }));
             if (made) { h += p(T('Import {file} from your downloads as its key.', { file: f })); }
         }
         $('howto').innerHTML = h;
@@ -203,12 +269,37 @@
         for (var i = 0; i < b.length; i++) { b[i].className = b[i].getAttribute('data-os') === os ? 'on' : ''; }
     }
 
+    function sshConfig() {
+        var c = 'Host lgtv\n    HostName ' + HOST + '\n    User root\n';
+        if (info.port && info.port !== 22) { c += '    Port ' + info.port + '\n'; }
+        if (made) { c += '    IdentityFile ~/.ssh/' + made.file + '\n    IdentitiesOnly yes\n'; }
+        if (info.legacyRsa) { c += '    HostKeyAlgorithms +ssh-rsa\n    PubkeyAcceptedAlgorithms +ssh-rsa\n'; }
+        return c;
+    }
+    function knownHosts() {
+        var name = info.port && info.port !== 22 ? '[' + HOST + ']:' + info.port : HOST;
+        return (info.hostKeys || []).map(function (k) { return name + ' ' + k.line; }).join('\n');
+    }
+
     function done() {
         show('step-done');
-        text('done-intro', made
-            ? T('Your new key is saved as {file}.  Log in like this:', { file: made.file })
-            : T('Log in with the key you sent, like this:'));
-        text('alpine-note', T('If the TV still had its default alpine password, it stops working after the TV\'s next restart: from then on, only keys can log in.'));
+        if (info.purpose === 'password') {
+            text('done-title', T('Done: the TV\'s password is set'));
+            text('done-intro', T('Log in as root with the password you just chose, like this:'));
+            text('alpine-note', '');
+        } else {
+            text('done-intro', made
+                ? T('Your new key is saved as {file}.  Log in like this:', { file: made.file })
+                : T('Log in with the key you sent, like this:'));
+            text('alpine-note', T('If the TV still had its default alpine password, it stops working after the TV\'s next restart: from then on, only keys can log in.'));
+        }
+        $('config-box').className = '';
+        $('config').textContent = sshConfig();
+        var kh = knownHosts();
+        $('known').textContent = kh;
+        $('known').style.display = $('known-save').style.display = $('known-intro').style.display = kh ? '' : 'none';
+        $('config-save').onclick = function () { save('lgtv-ssh-config.txt', sshConfig()); };
+        $('known-save').onclick = function () { save('lgtv-known_hosts.txt', kh + '\n'); };
         var ua = navigator.userAgent;
         var os = /Windows/.test(ua) ? 'win' : /Android|iPhone|iPad/.test(ua) ? 'phone' : 'unix';
         howto(os);

@@ -63,6 +63,8 @@ jobs:
           sh webos-app/build.sh
       - name: Keys made by the pairing page are real OpenSSH keys
         run: node tests/check-sshkey.js .cache/tweetnacl-1.0.3-nacl-fast.min.js
+      - name: Password hashes match glibc crypt()
+        run: node tests/check-sha512crypt.js .cache/tweetnacl-1.0.3-nacl-fast.min.js
       - name: TV screens and the pairing page in a browser
         run: |
           npm install --no-save playwright@1.48.2

@@ -4,9 +4,22 @@ All notable changes to LG webOS SSH Doctor.  Versions follow [semantic versionin
 
 ## Unreleased
 
+### Added
+
+- **SSH settings,** kept after a restart by a small startup script in `/var/lib/webosbrew/init.d`:
+  - **Your own password,** typed on the TV or on a phone or computer through the pairing page.  Only a SHA-512 crypt hash is ever sent or kept.
+  - **Keys only,** which won't turn on without a key.
+  - **SSH port,** with the old port kept open until you've logged in on the new one and keep it.  If dropbear won't start on the new port, SSH goes back to the old one.
+  - **Keep idle sessions connected** (a keepalive every 30 seconds), and **Reset to Homebrew Channel defaults.**
+- **Keys on this TV** can rename or remove a key, and shows when each one last logged in.
+- **More tools:** login history with failed tries and where they came from, the TV's SSH key fingerprints and making new ones, turning telnet off or on, SFTP details, every SSH server on the TV, and a report for getting help with no private details in it.
+- **Finds more setups:** Entware's OpenSSH or dropbear, Developer Mode's SSH, another program on the SSH port, empty host key files, settings that weren't applied after a restart, and failed logins.
+- The pairing page gives a `~/.ssh/config` entry, the TV's `known_hosts` lines, a Windows Terminal profile and SFTP instructions, and uses the TV's SSH port.
+
 ### Changed
 
 - **New icon.**  A bigger, easier to read "ssh" on the dark tile, so it stands out in the TV launcher.
+- The main screen is shorter: rarer actions moved to **More tools**, and **Go back to password login** shows up front when you're locked out.
 
 ## [0.1.0] - 2026-11-08
 

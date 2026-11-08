@@ -6,9 +6,12 @@
  *
  * Someone on the home network opens http://TV:PORT, types the code the TV
  * shows, and sends a public key (one they have, or one their browser makes:
- * the private key never leaves their device).  The key waits in
- * STATE_DIR/pending.pub until it's confirmed on the TV.  State for the TV app
- * is in STATE_DIR/state.json.  Plain ES5 for older Node.js.
+ * the private key never leaves their device), or, when the TV asked for a
+ * password, a SHA-512 crypt hash of one (the browser makes the hash; the
+ * password itself is never sent).  It waits in STATE_DIR/pending.pub or
+ * pending.hash until it's confirmed on the TV.  State for the TV app is in
+ * STATE_DIR/state.json; STATE_DIR/info.json (from ssh-doctor.sh) has the
+ * purpose, the SSH port and the TV's host keys.  Plain ES5 for older Node.js.
  *
  * Stops itself: 5 minutes without a code, 5 minutes after pairing, after one
  * key is confirmed or turned down, after 15 wrong codes, or 30 seconds after
@@ -32,7 +35,11 @@ var MAX_CODES = 3;
 var WAIT_MS = 5 * 60 * 1000;
 var ALIVE_MS = 30 * 1000;
 
-var state = { state: 'starting', code: '', port: 0, ips: IPS, expires: 0, triesLeft: TRIES, key: null };
+var INFO = { purpose: 'key', port: 22, legacyRsa: false, hostKeys: [] };
+try { INFO = JSON.parse(fs.readFileSync(DIR + '/info.json', 'utf8')); } catch (e) { /* the defaults */ }
+var HASH_RE = /^\$6\$(rounds=[0-9]{4,9}\$)?[.\/0-9A-Za-z]{1,16}\$[.\/0-9A-Za-z]{86}$/;
+
+var state = { state: 'starting', purpose: INFO.purpose, code: '', port: 0, ips: IPS, expires: 0, triesLeft: TRIES, key: null, password: false };
 var codesLeft = MAX_CODES;
 var token = null;
 var server = null;
@@ -101,7 +108,8 @@ var FILES = {
     '/': ['pair.html', 'text/html; charset=utf-8'],
     '/pair.js': ['pair.js', 'application/javascript; charset=utf-8'],
     '/sshkey.js': ['sshkey.js', 'application/javascript; charset=utf-8'],
-    '/nacl.js': ['nacl-fast.min.js', 'application/javascript; charset=utf-8']
+    '/nacl.js': ['nacl-fast.min.js', 'application/javascript; charset=utf-8'],
+    '/sha512crypt.js': ['sha512crypt.js', 'application/javascript; charset=utf-8']
 };
 
 function body(req, cb) {
@@ -130,7 +138,7 @@ function apiCode(req, res) {
             state.code = '';
             state.expires = now() + WAIT_MS;
             save();
-            return json(res, 200, { ok: true, token: token });
+            return json(res, 200, { ok: true, token: token, info: publicInfo() });
         }
         state.triesLeft--;
         if (state.triesLeft > 0) { save(); return json(res, 403, { error: 'wrong', triesLeft: state.triesLeft }); }
@@ -144,10 +152,35 @@ function apiCode(req, res) {
     });
 }
 
+// What the page needs for how-to-log-in and the SSH config it offers
+function publicInfo() {
+    return {
+        purpose: INFO.purpose, port: INFO.port, legacyRsa: !!INFO.legacyRsa,
+        hostKeys: (INFO.hostKeys || []).map(function (k) { return { type: k.type, fp: k.fp, line: k.line }; })
+    };
+}
+
+function apiPassword(req, res) {
+    body(req, function (b) {
+        if (!b || !authed(b.token)) { return json(res, 403, { error: 'not-paired' }); }
+        if (state.state !== 'paired') { return json(res, 409, { error: 'busy' }); }
+        if (INFO.purpose !== 'password') { return json(res, 400, { error: 'wrong-purpose' }); }
+        var h = String(b.hash || '');
+        if (!HASH_RE.test(h)) { return json(res, 400, { error: 'not-a-hash' }); }
+        fs.writeFileSync(DIR + '/pending.hash', h + '\n', { mode: 384 });
+        state.state = 'pending';
+        state.password = true;
+        state.expires = now() + WAIT_MS;
+        save();
+        json(res, 200, { ok: true });
+    });
+}
+
 function apiKey(req, res) {
     body(req, function (b) {
         if (!b || !authed(b.token)) { return json(res, 403, { error: 'not-paired' }); }
         if (state.state !== 'paired') { return json(res, 409, { error: 'busy' }); }
+        if (INFO.purpose !== 'key') { return json(res, 400, { error: 'wrong-purpose' }); }
         var text = String(b.key || '');
         if (/PRIVATE KEY|PuTTY-User-Key-File/.test(text)) { return json(res, 400, { error: 'private' }); }
         var lines = text.replace(/\r/g, '').split('\n').filter(function (l) { return /\S/.test(l) && !/^\s*#/.test(l); });
@@ -167,7 +200,7 @@ function apiKey(req, res) {
 
 function apiStatus(req, res, q) {
     if (!authed(q.token)) { return json(res, 403, { error: 'not-paired' }); }
-    json(res, 200, { state: state.state, key: state.key, ips: IPS });
+    json(res, 200, { state: state.state, key: state.key, ips: IPS, info: publicInfo() });
 }
 
 function query(url) {
@@ -194,6 +227,7 @@ function handle(req, res) {
     }
     if (req.method === 'POST' && p === '/api/code') { return apiCode(req, res); }
     if (req.method === 'POST' && p === '/api/key') { return apiKey(req, res); }
+    if (req.method === 'POST' && p === '/api/password') { return apiPassword(req, res); }
     if (req.method === 'GET' && p === '/api/status') { return apiStatus(req, res, query(url)); }
     send(res, 404, 'text/plain', 'Not found');
 }

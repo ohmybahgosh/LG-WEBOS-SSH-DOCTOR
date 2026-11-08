@@ -1,6 +1,7 @@
 // Made-up answers from ssh-doctor.sh, so the TV app can run in a desktop
 // browser: load it before app.js.  Pick a TV with ?s=healthy, alpine, locked,
-// off or messy.  The pairing screen plays out by itself: a phone connects,
+// off, messy or custom (its own settings, a port change underway).  ?pair=password
+// plays the pairing screen for a password.  The pairing screen plays out by itself: a phone connects,
 // then sends a key.
 (function () {
     'use strict';
@@ -13,9 +14,13 @@
         { type: 'ssh-rsa', fp: 'SHA256:0+Bbg/DcPTyzN9cG2jg00lDOV26ns23I1ilRaGycXM8' }
     ];
     var base = {
-        version: '0.1.0', hbc: true, sshEnabled: true, running: true, listening: true, dropbear: '2022.83',
+        version: '0.2.0', hbc: true, sshEnabled: true, running: true, listening: true, dropbear: '2022.83',
         password: 'none', keys: 1, keyFile: true, keyProblems: '', permProblems: '', telnet: true, telnetRunning: true,
-        failsafe: false, legacyRsa: false, ips: ['192.168.1.50'], hostKeys: host, findings: []
+        failsafe: false, legacyRsa: false, ips: ['192.168.1.50'], hostKeys: host, findings: [],
+        port: 22, portOwner: 'hbc', keysOnly: false, sftp: true, failedLogins: 0,
+        settings: { port: 22, trial: null, keysOnly: false, keepalive: false, password: false, hook: false, applied: true, flags: '-R' },
+        servers: [{ pid: 5550, kind: 'hbc', name: 'dropbear', ports: [22], cmd: '/media/developer/apps/usr/palm/services/org.webosbrew.hbchannel.service/bin/dropbear -R' }],
+        sessions: { '22': 1 }
     };
     function f(code, level) { return { code: code, level: level || 'problem' }; }
     var TVS = {
@@ -24,7 +29,13 @@
         locked: { keys: 0, keyProblems: 'crlf private nokeys', findings: [f('no-way-in'), f('keys-private'), f('keys-fixable'), f('telnet-off', 'tip')], telnet: false },
         off: { sshEnabled: false, running: false, listening: false, findings: [f('ssh-off')] },
         messy: { sshEnabled: false, listening: true, keys: 2, keyProblems: 'crlf wrapped bad', permProblems: 'file', legacyRsa: true, dropbear: '2019.78',
-            findings: [f('keys-fixable'), f('keys-bad'), f('perms'), f('ssh-off-next-boot', 'tip')] }
+            findings: [f('keys-fixable'), f('keys-bad'), f('perms'), f('ssh-off-next-boot', 'tip')] },
+        custom: { port: 2222, password: 'set', keys: 2, keysOnly: false, failedLogins: 7,
+            settings: { port: 2222, trial: 22, keysOnly: false, keepalive: true, password: true, hook: true, applied: true, flags: '-R -p 2222 -p 22 -K 30' },
+            servers: [{ pid: 5550, kind: 'hbc', name: 'dropbear', ports: [22, 2222], cmd: '/media/developer/apps/usr/palm/services/org.webosbrew.hbchannel.service/bin/dropbear -R -p 2222 -p 22 -K 30' },
+                { pid: 7001, kind: 'entware-openssh', name: 'sshd', ports: [2200], cmd: '/opt/sbin/sshd' }],
+            sessions: { '2222': 1, '22': 0 },
+            findings: [f('port-trial', 'tip'), f('failed-logins', 'tip'), f('other-ssh', 'tip')] }
     };
     var st = {};
     for (var k in base) { st[k] = base[k]; }
@@ -32,6 +43,7 @@
     for (k in o) { st[k] = o[k]; }
 
     var polls = 0;
+    var purpose = 'key';
     var started = 0;
     var REPLIES = {
         'backups': s === 'messy' ? 'authorized_keys.ssh-doctor-20261108-120000\n' : '',
@@ -44,13 +56,26 @@
         'password-on': 'Set the keys file aside as /home/root/.ssh/authorized_keys.ssh-doctor-off-20261108-120000\nPassword login is on: user root, password alpine.  It stays on after a restart until a key is added.',
         'pair-accept': 'Backed up /home/root/.ssh/authorized_keys to /home/root/.ssh/authorized_keys.ssh-doctor-20261108-120100\nAdded the key.\nThis is the first key, so after the next restart the alpine password stops working and only keys can log in.',
         'pair-stop': '{"state":"stopped"}',
+        'logins --json': JSON.stringify({ ok: 4, failed: st.failedLogins, since: '2026-11-08T09:12:40Z',
+            events: [
+                { t: '2026-11-08T12:31:05Z', kind: 'key', user: 'root', ip: '192.168.1.20', fp: 'SHA256:m3MvfV9IuUH4vKFN5CRBQGhIDOEanmNp29OKzXEOpRI' },
+                { t: '2026-11-08T11:58:44Z', kind: 'bad-password', user: 'root', ip: '192.168.1.77', fp: '' },
+                { t: '2026-11-08T11:58:40Z', kind: 'bad-user', user: '', ip: '192.168.1.77', fp: '' },
+                { t: '2026-11-08T10:02:13Z', kind: 'password', user: 'root', ip: '192.168.1.20', fp: '' },
+                { t: '2026-11-08T09:12:40Z', kind: 'key', user: 'root', ip: '192.168.1.21', fp: 'SHA256:LIutHwKSTuDLiEUKXphyCUxXto403BYsKDYyjfiNeLk' }
+            ],
+            failedFrom: st.failedLogins ? [{ ip: '192.168.1.77', n: st.failedLogins }] : [],
+            lastUsed: { 'SHA256:m3MvfV9IuUH4vKFN5CRBQGhIDOEanmNp29OKzXEOpRI': '2026-11-08T12:31:05Z' } }),
+        'hostkeys --json': JSON.stringify(host.map(function (h) { return { type: h.type, fp: h.fp, line: h.type + ' AAAA' }; })),
+        'report': 'LG webOS SSH Doctor 0.2.0 report\nwebOS: 9.2.0\nKernel: 5.4.268\nHomebrew Channel: installed, SSH switch yes, telnet yes, failsafe no\ndropbear: 2022.83, running yes, port 22, owner hbc\nOptions: wanted -R, running -R\nLogin: password none, keys 1, keys only no\nFindings: \nLogins in the log: 4 logins, 0 failed tries',
         'pair-reject': '{"state":"rejected"}'
     };
     function pairState() {
         polls++;
-        var p = { state: 'waiting', code: 'K7F-3QX', port: 28622, ips: st.ips, expires: started + 300000, triesLeft: 5, key: null };
+        var p = { state: 'waiting', purpose: purpose, code: 'K7F-3QX', port: 28622, ips: st.ips, expires: started + 300000, triesLeft: 5, key: null, password: false };
         if (q.pair === 'wait') { return p; }
         if (polls > 2) { p.state = 'paired'; p.code = ''; }
+        if (polls > 4 && purpose === 'password') { p.state = 'pending'; p.password = true; return p; }
         if (polls > 4) {
             p.state = 'pending';
             p.key = { type: 'ssh-ed25519', fp: 'SHA256:m3MvfV9IuUH4vKFN5CRBQGhIDOEanmNp29OKzXEOpRI', comment: 'lgtv-192.168.1.50-20261108', bits: null };
@@ -60,7 +85,7 @@
     window.SD_DEMO = function (args, cb) {
         setTimeout(function () {
             if (args === 'status --json') { return cb(true, JSON.stringify(st), ''); }
-            if (args === 'pair-start') { started = new Date().getTime(); polls = 0; return cb(true, JSON.stringify(pairState()), ''); }
+            if (args.indexOf('pair-start') === 0) { purpose = args.indexOf('password') > 0 ? 'password' : 'key'; started = new Date().getTime(); polls = 0; return cb(true, JSON.stringify(pairState()), ''); }
             if (args === 'pair-status') { return cb(true, JSON.stringify(pairState()), ''); }
             if (args.indexOf('restore') === 0) { return cb(true, 'Put authorized_keys.ssh-doctor-20261108-120000 back as authorized_keys.', ''); }
             cb(true, REPLIES[args] || '', '');

@@ -17,6 +17,8 @@ p { margin: 8px 0; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px; margin: 16px 0; }
 .hidden { display: none; }
 input, textarea, button { font: inherit; color: inherit; }
+input[type=password], input.pw { width: 100%; padding: 12px; font-size: 18px; background: #0b110f; border: 1px solid var(--line); border-radius: 10px; margin: 6px 0; }
+label { display: block; margin-top: 8px; font-size: 15px; color: var(--dim); }
 input[type=text] { width: 100%; padding: 14px; font-size: 28px; letter-spacing: 6px; text-align: center; text-transform: uppercase; background: #0b110f; border: 1px solid var(--line); border-radius: 10px; font-family: ui-monospace, Menlo, Consolas, monospace; }
 textarea { width: 100%; min-height: 110px; padding: 10px; background: #0b110f; border: 1px solid var(--line); border-radius: 10px; font: 13px/1.4 ui-monospace, Menlo, Consolas, monospace; }
 button { display: inline-block; margin: 10px 8px 0 0; padding: 12px 18px; border: 0; border-radius: 10px; background: var(--green); color: #06110c; font-weight: 600; cursor: pointer; }
@@ -30,6 +32,7 @@ pre { background: #0b110f; border: 1px solid var(--line); border-radius: 10px; p
 .tabs button { margin: 0 6px 8px 0; padding: 8px 12px; background: transparent; color: var(--dim); border: 1px solid var(--line); font-weight: 500; }
 .tabs button.on { color: var(--text); border-color: var(--green); }
 .fp { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 14px; word-break: break-all; }
+#config, #known { white-space: pre; overflow-x: auto; word-break: normal; }
 footer { margin-top: 32px; font-size: 13px; color: var(--dim); }
 footer a { color: var(--dim); }
 </style>
@@ -63,21 +66,42 @@ footer a { color: var(--dim); }
     </div>
   </section>
 
+  <section id="step-password" class="card hidden">
+    <h2 data-t>2. Choose the TV's password</h2>
+    <p data-t>This becomes root's password for SSH on your TV, also after restarts.  This page turns it into a scrambled hash first, so the password itself is never sent over your network.</p>
+    <label for="pw1" data-t>New password (at least 8 characters)</label>
+    <input id="pw1" class="pw" type="password" autocomplete="new-password" spellcheck="false">
+    <label for="pw2" data-t>The same password again</label>
+    <input id="pw2" class="pw" type="password" autocomplete="new-password" spellcheck="false">
+    <label><input id="pw-show" type="checkbox"> <span data-t>Show the password</span></label>
+    <button id="pw-go" data-t>Set this password</button>
+    <p id="pw-msg" class="err"></p>
+  </section>
+
   <section id="step-confirm" class="card hidden">
     <h2 data-t>3. Press OK on your TV</h2>
-    <p data-t>Your TV is asking whether to add this key.  Check that the code matches, then press OK on the remote.</p>
+    <p id="confirm-intro" data-t>Your TV is asking whether to add this key.  Check that the code matches, then press OK on the remote.</p>
     <p class="fp" id="fp"></p>
     <p id="confirm-msg" class="dim" data-t>Waiting for the TV...</p>
   </section>
 
   <section id="step-done" class="card hidden">
-    <h2 class="ok" data-t>Done: the key is on your TV</h2>
+    <h2 class="ok" id="done-title" data-t>Done: the key is on your TV</h2>
     <p id="done-intro"></p>
     <div class="tabs" id="tabs">
-      <button data-os="unix" data-t>Mac or Linux</button><button data-os="win" data-t>Windows</button><button data-os="putty" data-t>PuTTY</button><button data-os="phone" data-t>Phone</button>
+      <button data-os="unix" data-t>Mac or Linux</button><button data-os="win" data-t>Windows</button><button data-os="putty" data-t>PuTTY</button><button data-os="files" data-t>Files (SFTP)</button><button data-os="phone" data-t>Phone</button>
     </div>
     <div id="howto"></div>
     <p class="warn" id="alpine-note"></p>
+    <div id="config-box" class="hidden">
+      <h2 data-t>Make it easier next time</h2>
+      <p class="dim" data-t>Add this to the config file in your .ssh folder, and ssh lgtv logs in from then on.</p>
+      <pre id="config"></pre>
+      <button id="config-save" class="ghost" data-t>Download config</button>
+      <p class="dim" id="known-intro" data-t>And these lines in known_hosts in the same folder let your computer check it's really your TV, the first time too:</p>
+      <pre id="known"></pre>
+      <button id="known-save" class="ghost" data-t>Download known_hosts lines</button>
+    </div>
   </section>
 
   <section id="step-end" class="card hidden">
@@ -91,6 +115,7 @@ footer a { color: var(--dim); }
 </main>
 <script src="nacl.js"></script>
 <script src="sshkey.js"></script>
+<script src="sha512crypt.js"></script>
 <script src="pair.js"></script>
 </body>
 </html>

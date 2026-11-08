@@ -21,9 +21,11 @@
     var state = null;
     var backups = [];
     var busy = false;
-    var overlayMode = null; // null, 'busy', 'message', 'confirm', 'pair'
+    var overlayMode = null; // null, 'busy', 'message', 'confirm', 'pair', 'menu', 'input'
     var onConfirm = null;
     var pair = null;        // { timer, data, port, url, stage }
+    var menuStack = [];     // open menus: { title, items, at }
+    var inputDone = null;   // what OK does on an input screen
 
     function $(id) { return document.getElementById(id); }
     function esc(s) {
@@ -88,7 +90,14 @@
         'keys-bad': 'The keys file has lines that aren\'t working keys.  Fix my keys file moves them to a side file.',
         'perms': 'Other users can change the keys file or a folder above it, so the SSH server ignores the keys.  Fix my keys file sets the right permissions.',
         'password-default': 'Anyone on your network can log in with the default password, alpine.  Set up a key to turn that off.',
-        'telnet-off': 'Telnet is off, so if SSH breaks, this app is the only way back in.'
+        'telnet-off': 'Telnet is off, so if SSH breaks, this app is the only way back in.',
+        'port-taken': 'Another program already uses the SSH port, so the Homebrew Channel\'s SSH server can\'t start there.  More tools, SSH servers on this TV shows which one.',
+        'keys-only-no-keys': 'Keys only is on, but no key works, so nobody can log in.  Set up a key, or go back to password login.',
+        'hostkey-broken': 'One of the TV\'s own SSH keys is an empty file, which can stop SSH from starting.  Repair the TV\'s SSH keys fixes that.',
+        'settings-not-applied': 'SSH isn\'t running with your settings (it was restarted another way).  Put my settings back fixes that.',
+        'port-trial': 'SSH answers on two ports while you try the new one.  Log in on it, then keep it in SSH settings.',
+        'failed-logins': 'Someone tried wrong passwords or user names recently.  More tools, Login history shows where from.',
+        'other-ssh': 'Another SSH server runs on this TV too.  This app only changes the Homebrew Channel\'s.'
     };
 
     function find(code) {
@@ -101,8 +110,9 @@
     }
     function ip() { return (state && state.ips && state.ips[0]) || 'TV_IP'; }
     function canLogIn(s) {
-        return s.listening && (s.password === 'alpine' || s.password === 'set' || s.keys > 0);
+        return s.listening && (s.keys > 0 || (!s.keysOnly && (s.password === 'alpine' || s.password === 'set')));
     }
+    function sset() { return (state && state.settings) || {}; }
 
     function refresh(cb) {
         runScript('status --json', function (ok, out, err) {
@@ -137,13 +147,15 @@
         $('dot').className = 'dot ' + (probs.length ? (ok ? 'dot-warn' : 'dot-bad') : 'dot-ok');
         $('headline').textContent = !probs.length ? T('SSH works') : (ok ? T('SSH works, with problems') : T('SSH needs fixing'));
         $('subline').textContent = ok
-            ? T('Log in as root at {ip}, port 22.', { ip: ip() })
+            ? T('Log in as root at {ip}, port {port}.', { ip: ip(), port: s.port || 22 })
             : T('Nobody can log in over SSH right now.  The buttons on the right fix it.');
 
-        var server = s.listening ? '<span class="ok">' + esc(T('running on port 22')) + '</span>'
+        var server = s.listening ? '<span class="ok">' + esc(T('running on port {port}', { port: s.port || 22 })) + '</span>'
+            + (sset().trial ? esc(T(' (and {port} for now)', { port: sset().trial })) : '')
             : (s.sshEnabled ? '<span class="bad">' + esc(T('on, but not running')) + '</span>' : '<span class="bad">' + esc(T('off')) + '</span>');
         var login;
-        if (s.password === 'alpine') { login = '<span class="warn">' + esc(T('password alpine')) + '</span>' + (s.keys ? esc(T(', and {n} keys', { n: s.keys })) : ''); }
+        if (s.keysOnly) { login = '<span class="ok">' + esc(T('keys only')) + '</span>' + esc(T(', and {n} keys', { n: s.keys || 0 })); }
+        else if (s.password === 'alpine') { login = '<span class="warn">' + esc(T('password alpine')) + '</span>' + (s.keys ? esc(T(', and {n} keys', { n: s.keys })) : ''); }
         else if (s.password === 'set') { login = esc(T('your password')) + (s.keys ? esc(T(', and {n} keys', { n: s.keys })) : ''); }
         else if (s.keys) { login = '<span class="ok">' + esc(s.keys === 1 ? T('1 key') : T('{n} keys', { n: s.keys })) + '</span>'; }
         else { login = '<span class="bad">' + esc(T('nobody can log in')) + '</span>'; }
@@ -166,7 +178,10 @@
 
         show('sshon', find('ssh-off') || find('ssh-not-running') || find('ssh-off-next-boot'));
         show('fixkeys', find('keys-private') || find('keys-fixable') || find('keys-bad') || find('perms') || find('no-way-in'));
-        show('restore', backups.length > 0);
+        show('apply', find('settings-not-applied'));
+        show('hostfix', find('hostkey-broken'));
+        show('password', find('no-way-in') || find('no-password') || find('keys-only-no-keys'));
+        $('settings-hint').textContent = settingsHint();
         $('keys-hint').textContent = s.keys === 1 ? T('1 key') : T('{n} keys', { n: s.keys || 0 });
         var n = buttons().length;
         $('actions').className = 'actions' + (n >= 8 ? ' tighter' : (n >= 7 ? ' tight' : ''));
@@ -188,6 +203,8 @@
     }
     function closeOverlay() {
         overlayMode = null;
+        menuStack = [];
+        inputDone = null;
         onConfirm = null;
         $('overlay').className = 'overlay hidden';
         focusCurrent();
@@ -198,35 +215,43 @@
         overlay('confirm', title, html, T('Press OK to go ahead, or BACK to cancel.'));
     }
 
-    // Run a script command with a busy screen, then show what it did
-    function act(title, args) {
+    // Run a script command with a busy screen, then show what it did: okHtml
+    // when it worked (if given), otherwise the script's own words
+    function act(title, args, okHtml) {
         if (busy) { return; }
         busy = true;
+        menuStack = [];
         overlay('busy', title, '<span class="spinner"></span>' + esc(T('Working on it…')), '');
         runScript(args, function (ok, out, err) {
             busy = false;
             var text = (out || err || '').trim();
-            message(ok ? T('{title}: done', { title: title }) : T('{title}: something went wrong', { title: title }), pre(TS(text)));
+            if (ok && okHtml) { message(T('{title}: done', { title: title }), okHtml); }
+            else { message(ok ? T('{title}: done', { title: title }) : T('{title}: something went wrong', { title: title }), pre(TS(text))); }
             refresh();
         });
     }
 
     // ------------------------------------------------------------------ pairing
 
-    function startPair() {
+    function pairTitle() { return pair && pair.purpose === 'password' ? T('Your own password') : T('Set up a key'); }
+
+    function startPair(purpose) {
         if (busy) { return; }
+        purpose = purpose === 'password' ? 'password' : 'key';
         busy = true;
-        overlay('busy', T('Set up a key'), '<span class="spinner"></span>' + esc(T('Starting the pairing page…')), '');
-        runScript('pair-start', function (ok, out) {
+        menuStack = [];
+        var title = purpose === 'password' ? T('Your own password') : T('Set up a key');
+        overlay('busy', title, '<span class="spinner"></span>' + esc(T('Starting the pairing page…')), '');
+        runScript('pair-start ' + purpose, function (ok, out) {
             busy = false;
             var d = parse(out);
             if (!d || d.error || !d.port) {
-                message(T('Set up a key'), p(esc(d && d.error === 'no-node'
+                message(title, p(esc(d && d.error === 'no-node'
                     ? T('This TV has no Node.js, which the pairing page needs.  Use How to log in to add a key over telnet instead.')
                     : T('The pairing page didn\'t start.'))) + (d && d.log ? pre(d.log) : ''));
                 return;
             }
-            pair = { data: d, port: d.port, url: 'http://' + ((d.ips && d.ips[0]) || ip()) + ':' + d.port, timer: null, stage: '' };
+            pair = { data: d, purpose: purpose, port: d.port, url: 'http://' + ((d.ips && d.ips[0]) || ip()) + ':' + d.port, timer: null, stage: '' };
             overlayMode = 'pair';
             drawPair();
             pair.timer = setInterval(pollPair, 2000);
@@ -249,6 +274,16 @@
     function drawPair() {
         var d = pair.data;
         var st = d.state;
+        if (st === 'pending' && d.password) {
+            if (pair.stage === 'pending') { return; }
+            pair.stage = 'pending';
+            onConfirm = acceptKey;
+            overlay('pair', T('Set this password?'),
+                p(esc(T('A new root password was typed on the other device.  Only its scrambled hash was sent.')))
+                + p(esc(T('Once it\'s set, log in as root with it, also after restarts.'))),
+                T('Press OK to set it, or BACK to turn it down.'));
+            return;
+        }
         if (st === 'pending' && d.key) {
             if (pair.stage === 'pending') { return; }
             pair.stage = 'pending';
@@ -263,7 +298,7 @@
             return;
         }
         var stateText = st === 'paired'
-            ? T('Connected.  Choose a key on the other device.')
+            ? (pair.purpose === 'password' ? T('Connected.  Type the password on the other device.') : T('Connected.  Choose a key on the other device.'))
             : T('Waiting for a phone or computer…') + (d.triesLeft < 5 ? '  ' + T('{n} tries left for this code.', { n: d.triesLeft }) : '');
         var html = '<div class="pair">' + qrSvg(pair.url)
             + '<div class="pair-side">'
@@ -285,7 +320,7 @@
             }
         }
         pair.stage = st;
-        overlay('pair', T('Set up a key'), html, hint);
+        overlay('pair', pairTitle(), html, hint);
     }
 
     function pollPair() {
@@ -304,7 +339,7 @@
                 locked: T('Too many wrong codes were typed, so the pairing page closed.  Nothing changed.'),
                 stopped: T('The pairing page closed.  Nothing changed.')
             };
-            message(T('Set up a key'), p(esc(why[d.state] || why.stopped)));
+            message(pairTitle(), p(esc(why[d.state] || why.stopped)));
         });
     }
 
@@ -320,14 +355,20 @@
         if (!p0) { return; }
         clearInterval(p0.timer);
         busy = true;
-        overlay('busy', T('Add this key?'), '<span class="spinner"></span>' + esc(T('Adding the key…')), '');
+        var pw = p0.purpose === 'password';
+        overlay('busy', pw ? T('Set this password?') : T('Add this key?'), '<span class="spinner"></span>' + esc(pw ? T('Setting the password…') : T('Adding the key…')), '');
         runScript('pair-accept', function (ok, out) {
             busy = false;
             pair = null;
             // The page stays up a little so the other device sees the answer
             setTimeout(function () { runScript('pair-stop', function () {}); }, 20000);
-            message(ok ? T('Key added') : T('The key wasn\'t added'),
-                pre(TS((out || '').trim())) + (ok ? p(esc(T('The other device now shows how to log in.'))) : ''));
+            if (pw) {
+                message(ok ? T('Password set') : T('The password wasn\'t set'),
+                    ok ? p(esc(T('Root\'s password is set.  Log in as root with it, also after restarts.'))) : pre(TS((out || '').trim())));
+            } else {
+                message(ok ? T('Key added') : T('The key wasn\'t added'),
+                    pre(TS((out || '').trim())) + (ok ? p(esc(T('The other device now shows how to log in.'))) : ''));
+            }
             refresh();
         });
     }
@@ -336,10 +377,342 @@
         runScript('pair-reject', function () {
             setTimeout(function () { runScript('pair-stop', function () {}); }, 10000);
         });
+        var pw = pair && pair.purpose === 'password';
         if (pair && pair.timer) { clearInterval(pair.timer); }
         pair = null;
         onConfirm = null;
-        message(T('Set up a key'), p(esc(T('The key was turned down.  Nothing changed.'))));
+        message(pw ? T('Your own password') : T('Set up a key'), p(esc(pw ? T('The password was turned down.  Nothing changed.') : T('The key was turned down.  Nothing changed.'))));
+    }
+
+    // ------------------------------------------------------------------ menus
+    //
+    // A list in the overlay, moved through with UP/DOWN.  BACK goes to the
+    // menu it came from.  Items: { label, hint, fn, fix }
+
+    function menu(title, items, keepAt) {
+        var top = menuStack[menuStack.length - 1];
+        if (!keepAt || !top || top.title !== title) { menuStack.push({ title: title, items: items, at: 0 }); }
+        else { top.items = items; }
+        drawMenu();
+    }
+    function drawMenu() {
+        var m = menuStack[menuStack.length - 1];
+        if (!m) { closeOverlay(); return; }
+        var items = m.items.filter(function (x) { return x; });
+        m.items = items;
+        if (m.at >= items.length) { m.at = items.length - 1; }
+        overlay('menu', m.title, '<div class="menu">' + items.map(function (x, i) {
+            return '<div class="mrow' + (x.fix ? ' fix' : '') + (i === m.at ? ' focus' : '') + '" data-i="' + i + '"><span>' + esc(x.label)
+                + '</span><small>' + esc(x.hint || '') + '</small></div>';
+        }).join('') + '</div>', T('OK selects, BACK goes back.'));
+        Array.prototype.slice.call(document.querySelectorAll('.mrow')).forEach(function (row) {
+            row.addEventListener('mouseover', function () { m.at = +row.getAttribute('data-i'); markMenu(); });
+            row.addEventListener('click', function (e) { e.stopPropagation(); m.at = +row.getAttribute('data-i'); pickMenu(); });
+        });
+    }
+    function markMenu() {
+        var m = menuStack[menuStack.length - 1];
+        Array.prototype.slice.call(document.querySelectorAll('.mrow')).forEach(function (row, i) {
+            row.className = row.className.replace(/ focus/g, '') + (i === m.at ? ' focus' : '');
+        });
+    }
+    function pickMenu() {
+        var m = menuStack[menuStack.length - 1];
+        var it = m && m.items[m.at];
+        if (it && it.fn) { it.fn(); }
+    }
+    function menuBack() {
+        menuStack.pop();
+        if (menuStack.length) { drawMenu(); } else { closeOverlay(); }
+    }
+    // Back to the menu after a message, if one was open
+    function reopenMenu() {
+        if (menuStack.length) { drawMenu(); return true; }
+        return false;
+    }
+
+    // ------------------------------------------------------------------ typing
+    //
+    // Text boxes bring up the TV's on-screen keyboard.  fields: [{ id, label,
+    // type, value }]; done(values) runs on OK in the last box.
+
+    function ask(title, intro, fields, done) {
+        inputDone = done;
+        overlay('input', title, (intro ? p(esc(intro)) : '') + fields.map(function (f) {
+            return '<label class="in-label" for="in-' + f.id + '">' + esc(f.label) + '</label>'
+                + '<input class="in" id="in-' + f.id + '" type="' + (f.type || 'text') + '" value="' + esc(f.value || '') + '"'
+                + (f.type === 'number' ? ' inputmode="numeric"' : '') + ' autocomplete="off" spellcheck="false">';
+        }).join('') + '<p id="in-msg" class="bad"></p>', T('OK on the keyboard goes to the next box, then saves.  BACK cancels.'));
+        var first = document.querySelector('.in');
+        if (first) { setTimeout(function () { first.focus(); }, 50); }
+    }
+    function inputs() { return Array.prototype.slice.call(document.querySelectorAll('.in')); }
+    function inputMsg(t) { var e = $('in-msg'); if (e) { e.textContent = t; } }
+    function inputKey(e) {
+        var k = e.keyCode, list = inputs(), i = list.indexOf(document.activeElement);
+        if (k === KEY.ENTER) {
+            e.preventDefault();
+            if (i >= 0 && i < list.length - 1) { list[i + 1].focus(); return; }
+            var vals = {};
+            list.forEach(function (x) { vals[x.id.slice(3)] = x.value; });
+            if (inputDone) { inputDone(vals); }
+        } else if (k === KEY.DOWN && i >= 0 && i < list.length - 1) { e.preventDefault(); list[i + 1].focus(); }
+        else if (k === KEY.UP && i > 0) { e.preventDefault(); list[i - 1].focus(); }
+        else if (k === KEY.BACK || k === KEY.ESC) {
+            e.preventDefault();
+            inputDone = null;
+            if (!reopenMenu()) { closeOverlay(); }
+        }
+    }
+
+    // ------------------------------------------------------------------ SSH settings
+
+    function settingsHint() {
+        var st = sset(), bits = [];
+        if (st.port && st.port !== 22) { bits.push(T('port {port}', { port: st.port })); }
+        if (st.password) { bits.push(T('own password')); }
+        if (st.keysOnly) { bits.push(T('keys only')); }
+        if (st.keepalive) { bits.push(T('keepalive')); }
+        return bits.length ? bits.join(', ') : T('Homebrew Channel defaults');
+    }
+
+    function settingsMenu(keep) {
+        var st = sset(), s = state || {};
+        var custom = st.password || st.keysOnly || st.keepalive || (st.port && st.port !== 22) || st.trial;
+        menu(T('SSH settings'), [
+            { label: T('Your own password'), hint: st.password ? T('set') : (s.password === 'alpine' ? T('not set, alpine works') : T('not set')), fn: passwordMenu },
+            { label: T('Keys only'), hint: st.keysOnly ? T('on: passwords don\'t log in') : T('off'), fn: keysOnlyToggle },
+            { label: T('SSH port'), hint: st.trial ? T('{port}, and {old} for now', { port: st.port, old: st.trial }) : String(st.port || 22), fn: portMenu, fix: !!st.trial },
+            { label: T('Keep idle sessions connected'), hint: st.keepalive ? T('on') : T('off'), fn: keepaliveToggle },
+            custom ? { label: T('Reset to Homebrew Channel defaults'), hint: T('port 22, its usual password rules'), fn: resetSettings } : null
+        ], keep);
+    }
+
+    function passwordMenu() {
+        var st = sset();
+        menu(T('Your own password'), [
+            { label: T('Type it on the TV'), hint: T('with the on-screen keyboard'), fn: passwordOnTv },
+            { label: T('Type it on my phone or computer'), hint: T('easier: scan a code'), fn: function () { startPair('password'); } },
+            st.password ? { label: T('Remove my password'), hint: T('back to the Homebrew Channel\'s rules'), fn: function () {
+                confirmThen(T('Remove my password'), p(esc(T('Root\'s password goes back to what the Homebrew Channel does: none when there\'s a keys file, alpine when there isn\'t.'))),
+                    function () { act(T('Remove my password'), 'clear-password', p(esc(T('Your password is removed.')))); });
+            } } : null
+        ]);
+    }
+
+    function passwordOnTv() {
+        ask(T('Your own password'), T('This becomes root\'s password for SSH, also after restarts.  Only a scrambled hash of it is kept on the TV.'), [
+            { id: 'pw1', label: T('New password (at least 8 characters)'), type: 'password' },
+            { id: 'pw2', label: T('The same password again'), type: 'password' }
+        ], function (v) {
+            if (v.pw1.length < 8) { inputMsg(T('Use at least 8 characters.')); return; }
+            if (v.pw1 !== v.pw2) { inputMsg(T('The two passwords are different.')); return; }
+            if (/^alpine$/i.test(v.pw1) || /^(password|12345678|123456789|qwertyui)$/i.test(v.pw1)) { inputMsg(T('Pick a password that\'s harder to guess.')); return; }
+            if (!window.SD_SHA512CRYPT) { inputMsg(T('This part of the app didn\'t load.  Use your phone instead.')); return; }
+            inputDone = null;
+            overlay('busy', T('Your own password'), '<span class="spinner"></span>' + esc(T('Scrambling the password…')), '');
+            setTimeout(function () {
+                var h;
+                try { h = window.SD_SHA512CRYPT.hash(v.pw1); } catch (e) { message(T('Your own password'), p(esc(String(e)))); return; }
+                v.pw1 = v.pw2 = '';
+                act(T('Your own password'), 'set-password ' + shq(h),
+                    p(esc(T('Root\'s password is set.  Log in as root with it, also after restarts.')))
+                    + (sset().keysOnly ? p(esc(T('Keys only is on, so the password works once you turn that off.'))) : ''));
+            }, 60);
+        });
+    }
+
+    function keysOnlyToggle() {
+        var st = sset(), s = state || {};
+        if (st.keysOnly) {
+            act(T('Keys only'), 'set-keys-only off', p(esc(T('Keys only is off: passwords log in again.'))));
+            return;
+        }
+        if (!s.keys) { message(T('Keys only'), p(esc(T('Add a key first (Set up a key): with keys only and no key, nobody could log in.')))); return; }
+        confirmThen(T('Keys only'),
+            p(esc(T('Passwords stop working for SSH, alpine and your own too.  Only the {n} keys on this TV can log in.', { n: s.keys })))
+            + p(esc(T('If you lose your key, this app\'s Go back to password login turns passwords back on.'))),
+            function () { act(T('Keys only'), 'set-keys-only on', p(esc(T('Keys only is on: passwords don\'t log in any more.')))); });
+    }
+
+    function keepaliveToggle() {
+        var on = sset().keepalive;
+        act(T('Keep idle sessions connected'), 'set-keepalive ' + (on ? 'off' : 'on'),
+            p(esc(on ? T('Keepalive is off.') : T('The TV now checks on idle sessions every 30 seconds, so routers don\'t drop them.'))));
+    }
+
+    function portMenu() {
+        var st = sset(), s = state || {};
+        if (st.trial) {
+            var n = (s.sessions || {})[String(st.port)] || 0;
+            menu(T('SSH port'), [
+                { label: T('Keep port {port}', { port: st.port }), hint: n ? T('someone is logged in on it, so it works') : T('log in on it first to be sure'), fix: n > 0, fn: function () {
+                    var go = function () { act(T('SSH port'), 'port-keep', p(esc(T('SSH uses port {port} now.  Port {old} is closed.', { port: st.port, old: st.trial })))); };
+                    if (n) { go(); } else {
+                        confirmThen(T('Keep port {port}', { port: st.port }), p(esc(T('Nobody is logged in on port {port} right now.  Keep it anyway?', { port: st.port }))), go);
+                    }
+                } },
+                { label: T('Go back to port {port}', { port: st.trial }), hint: T('undo the change'), fn: function () {
+                    act(T('SSH port'), 'port-revert', p(esc(T('SSH is back on port {port}.', { port: st.trial }))));
+                } }
+            ]);
+            return;
+        }
+        var cur = st.port || 22;
+        var pick = function (n) {
+            act(T('SSH port'), 'set-port ' + n, n === 22 ? p(esc(T('SSH is on port 22 again.')))
+                : p(esc(T('SSH now answers on port {port} too.  Log in with this, then come back here and keep the new port:', { port: n })))
+                + pre('ssh -p ' + n + ' root@' + ip()) + p(esc(T('Port {old} stays open until then, so you can\'t lock yourself out.', { old: cur }))));
+        };
+        menu(T('SSH port'), [
+            cur !== 2222 ? { label: '2222', hint: T('a common choice'), fn: function () { pick(2222); } } : null,
+            cur !== 22022 ? { label: '22022', hint: T('rarely scanned'), fn: function () { pick(22022); } } : null,
+            { label: T('Another port…'), hint: T('1024 to 65535'), fn: function () {
+                ask(T('SSH port'), T('Pick a port from 1024 to 65535 that nothing else on the TV uses.'), [{ id: 'port', label: T('Port'), type: 'number', value: '' }], function (v) {
+                    var n = parseInt(v.port, 10);
+                    if (!(n >= 1024 && n <= 65535)) { inputMsg(T('Pick a port from 1024 to 65535.')); return; }
+                    inputDone = null;
+                    pick(n);
+                });
+            } },
+            cur !== 22 ? { label: T('22, the usual SSH port'), hint: T('back to the default'), fn: function () { pick(22); } } : null
+        ]);
+    }
+
+    function resetSettings() {
+        confirmThen(T('Reset to Homebrew Channel defaults'),
+            p(esc(T('This removes your password, keys only, keepalive and the port change.  SSH goes back to port 22 with the Homebrew Channel\'s usual password and key rules.  Keys stay.'))),
+            function () { act(T('Reset to Homebrew Channel defaults'), 'reset-settings', p(esc(T('Every SSH setting is removed.')))); });
+    }
+
+    // ------------------------------------------------------------------ keys
+
+    function keysMenu(lastUsed) {
+        runScript('keys --json', function (ok, out) {
+            var k = parse(out);
+            if (!k || !k.length) {
+                message(T('Keys on this TV'), p(esc(T('No key can log in yet.  Use Set up a key to add one.'))));
+                return;
+            }
+            var go = function (used) {
+                menu(T('Keys on this TV'), k.slice(0, 12).map(function (x) {
+                    var when = used && used[x.fp] ? T('last used {t}', { t: used[x.fp].replace('T', ' ').slice(0, 16) }) : T('not used lately');
+                    return { label: (x.comment || T('(no name)')) + '  ·  ' + x.type.replace('ecdsa-sha2-', 'ecdsa ').replace('ssh-', ''),
+                        hint: x.fp.slice(0, 22) + '…  ' + when, fn: function () { keyMenu(x); } };
+                }));
+            };
+            if (lastUsed) { go(lastUsed); return; }
+            runScript('logins --json', function (ok2, out2) { var l = parse(out2); go(l && l.lastUsed); });
+        });
+    }
+
+    function keyMenu(x) {
+        menu(x.comment || T('(no name)'), [
+            { label: T('Fingerprint'), hint: x.fp, fn: function () {} },
+            { label: T('Rename'), hint: T('give it a name you\'ll know'), fn: function () {
+                ask(T('Rename'), '', [{ id: 'name', label: T('Name'), value: x.comment || '' }], function (v) {
+                    inputDone = null;
+                    act(T('Rename'), 'key-rename ' + shq(x.fp) + ' ' + shq(v.name), p(esc(T('Renamed the key.  A backup of the keys file was kept.'))));
+                });
+            } },
+            { label: T('Remove'), hint: T('it won\'t log in any more'), fn: function () {
+                confirmThen(T('Remove this key?'), '<div class="fp">' + esc(x.type + '\n' + x.fp + '\n' + (x.comment || '')) + '</div>'
+                    + p(esc(T('Whoever has this key can\'t log in any more.  A backup of the keys file is kept, so Undo a change can put it back.'))),
+                    function () { act(T('Remove'), 'key-remove ' + shq(x.fp), p(esc(T('Removed the key.')))); });
+            } }
+        ]);
+    }
+
+    // ------------------------------------------------------------------ more tools
+
+    function toolsMenu() {
+        var s = state || {};
+        menu(T('More tools'), [
+            { label: T('Login history'), hint: s.failedLogins ? T('{n} failed tries lately', { n: s.failedLogins }) : T('who logged in, and from where'), fn: loginHistory },
+            { label: T('This TV\'s SSH keys'), hint: T('fingerprints, or make new ones'), fn: hostKeysMenu },
+            { label: T('Telnet'), hint: s.telnetRunning ? T('on, no password') : T('off'), fn: telnetToggle },
+            { label: T('File transfer (SFTP)'), hint: s.sftp ? T('works') : T('missing'), fn: sftpInfo },
+            { label: T('SSH servers on this TV'), hint: T('{n} found', { n: (s.servers || []).length }), fn: serversInfo },
+            { label: T('Report for getting help'), hint: T('no private details'), fn: reportShow },
+            backups.length ? { label: T('Undo a change'), hint: T('put a backup back'), fn: actions.restore } : null,
+            { label: T('Go back to password login'), hint: T('if you\'re locked out'), fn: actions.password }
+        ]);
+    }
+
+    function loginHistory() {
+        runScript('logins --json', function (ok, out) {
+            var d = parse(out);
+            if (!d || !d.events) { message(T('Login history'), p(esc(T('The TV\'s log couldn\'t be read.')))); return; }
+            if (!d.events.length) { message(T('Login history'), p(esc(T('No SSH logins in the TV\'s log.  It keeps the last few hours.')))); return; }
+            var KIND = { key: T('key'), password: T('password'), 'bad-password': T('wrong password'), 'bad-user': T('unknown user') };
+            var rows = d.events.slice(0, 9).map(function (e) {
+                var bad = /^bad/.test(e.kind);
+                return '<tr><td>' + esc(e.t.replace('T', ' ').slice(5, 16)) + '</td><td class="' + (bad ? 'bad' : 'ok') + '">' + esc(KIND[e.kind] || e.kind)
+                    + '</td><td>' + esc(e.ip) + '</td></tr>';
+            }).join('');
+            var outside = (d.failedFrom || []).some(function (f) { return !/^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|127\.|169\.254\.|fe80:|fd|::1|::ffff:(10|192\.168|127)\.)/i.test(f.ip); });
+            var from = (d.failedFrom || []).sort(function (a, b) { return b.n - a.n; }).slice(0, 3).map(function (f) { return f.ip + ' (' + f.n + ')'; }).join(', ');
+            message(T('Login history'), p(esc(T('{ok} logins and {bad} failed tries since {t}.', { ok: d.ok, bad: d.failed, t: (d.since || '').replace('T', ' ').slice(0, 16) })))
+                + '<table class="keys">' + rows + '</table>'
+                + (from ? p(esc(T('Failed tries came from: {list}', { list: from }))) : '')
+                + (outside ? p(esc(T('Some tries came from outside your home network, so the TV can be reached from the internet: check your router\'s port forwarding.'))) : ''));
+        });
+    }
+
+    function hostKeysMenu() {
+        menu(T('This TV\'s SSH keys'), [
+            { label: T('Show fingerprints'), hint: T('to check the first login'), fn: function () {
+                runScript('hostkeys --json', function (ok, out) {
+                    var k = parse(out) || [];
+                    if (!k.length) { message(T('This TV\'s SSH keys'), p(esc(T('There are no keys yet.  They\'re made at the first login.')))); return; }
+                    message(T('This TV\'s SSH keys'), p(esc(T('The first time a computer connects, it shows one of these.  It should match:')))
+                        + '<div class="fp">' + esc(k.map(function (x) { return x.type + ' ' + x.fp; }).join('\n')) + '</div>');
+                });
+            } },
+            { label: T('Make new keys'), hint: T('if they\'re broken or were copied'), fn: function () {
+                confirmThen(T('Make new keys'), p(esc(T('The current keys are backed up, then new ones are made at the next login.  Computers that logged in before warn REMOTE HOST IDENTIFICATION HAS CHANGED once: run the ssh-keygen -R line from How to log in on them.'))),
+                    function () { act(T('Make new keys'), 'hostkeys-reset', p(esc(T('Done.  New keys are made at the next login.')))); });
+            } }
+        ]);
+    }
+
+    function telnetToggle() {
+        var s = state || {};
+        if (s.telnetRunning || s.telnet) {
+            confirmThen(T('Turn telnet off'), p(esc(T('Telnet lets anyone on your network in as root with no password.  Turning it off is safer once SSH works.  If SSH breaks later, this app can still fix it.'))),
+                function () { act(T('Turn telnet off'), 'telnet-off', p(esc(T('Telnet is off, now and after restarts.')))); });
+        } else {
+            act(T('Turn telnet on'), 'telnet-on', p(esc(T('Telnet is on, on port 23, with no password.'))));
+        }
+    }
+
+    function sftpInfo() {
+        var s = state || {};
+        if (!s.sftp) {
+            message(T('File transfer (SFTP)'), p(esc(T('The Homebrew Channel\'s file transfer helper is missing.  Reinstall the Homebrew Channel to get it back.'))));
+            return;
+        }
+        message(T('File transfer (SFTP)'), p(esc(T('Works.  In WinSCP, FileZilla or Cyberduck, choose SFTP and log in like SSH:')))
+            + pre(T('Host: {host}\nPort: {port}\nUser: root', { host: ip(), port: s.port || 22 }))
+            + p(esc(T('Your files are in /home/root, USB drives under /tmp/usb.'))));
+    }
+
+    function serversInfo() {
+        var s = state || {};
+        var NAMES = { hbc: T('Homebrew Channel (dropbear)'), 'entware-openssh': T('Entware OpenSSH'), 'entware-dropbear': T('Entware dropbear'), devmode: T('Developer Mode'), other: T('Something else') };
+        var list = s.servers || [];
+        if (!list.length) { message(T('SSH servers on this TV'), p(esc(T('No SSH server is running.')))); return; }
+        message(T('SSH servers on this TV'), '<table class="keys">' + list.map(function (x) {
+            return '<tr><td>' + esc(NAMES[x.kind] || x.kind) + '</td><td>' + esc(x.ports.length ? T('port {port}', { port: x.ports.join(', ') }) : T('no port')) + '<br><small>' + esc(x.cmd) + '</small></td></tr>';
+        }).join('') + '</table>' + (list.length > 1 ? p(esc(T('This app only changes the Homebrew Channel\'s server.  The others are left alone.'))) : ''));
+    }
+
+    function reportShow() {
+        runScript('report', function (ok, out) {
+            var r = (out || '').trim();
+            message(T('Report for getting help'), '<div class="pair">' + qrSvg(r) + '<div class="pair-side">'
+                + p(esc(T('Scan this with your phone to copy the report, then paste it in a GitHub issue or a forum post.  It has no addresses, keys or names in it.'))) + '</div></div>');
+        });
     }
 
     // ------------------------------------------------------------------ actions
@@ -349,28 +722,15 @@
         var h = '';
         var opts = s.legacyRsa ? '-o HostKeyAlgorithms=+ssh-rsa -o PubkeyAcceptedAlgorithms=+ssh-rsa ' : '';
         h += p(esc(T('From a computer on the same network, in Terminal (Mac, Linux) or PowerShell (Windows):')));
-        h += pre('ssh ' + opts + 'root@' + ip());
+        var port = s.port && s.port !== 22 ? '-p ' + s.port + ' ' : '';
+        h += pre('ssh ' + opts + port + 'root@' + ip());
         if (s.legacyRsa) { h += p(esc(T('This TV\'s SSH server is old, so newer computers need the two -o options above.'))); }
-        h += p(esc(s.password === 'alpine' ? T('The password is alpine.') : T('It logs in with your key.  No key yet?  Use Set up a key.')));
-        h += p(TC('If ssh says REMOTE HOST IDENTIFICATION HAS CHANGED, the TV\'s SSH keys were made again (after a reset, for example).  Check the fingerprint below, then run {cmd} on the computer and try again.', { cmd: 'ssh-keygen -R ' + ip() }));
+        h += p(esc(s.keysOnly || s.password === 'none' ? T('It logs in with your key.  No key yet?  Use Set up a key.')
+            : (sset().password ? T('Use your own password, or your key.') : (s.password === 'alpine' ? T('The password is alpine.') : T('It logs in with your key.  No key yet?  Use Set up a key.')))));
+        h += p(TC('If ssh says REMOTE HOST IDENTIFICATION HAS CHANGED, the TV\'s SSH keys were made again (after a reset, for example).  Check the fingerprint below, then run {cmd} on the computer and try again.', { cmd: 'ssh-keygen -R ' + (s.port && s.port !== 22 ? '[' + ip() + ']:' + s.port : ip()) }));
         var hk = (s.hostKeys || []).filter(function (k) { return k.type === 'ssh-ed25519'; })[0] || (s.hostKeys || [])[0];
         if (hk) { h += '<div class="fp">' + esc(hk.type + ' ' + hk.fp) + '</div>'; }
         message(T('How to log in'), h);
-    }
-
-    function keysList() {
-        runScript('keys --json', function (ok, out) {
-            var k = parse(out);
-            if (!k || !k.length) {
-                message(T('Keys on this TV'), p(esc(T('No key can log in yet.  Use Set up a key to add one.'))));
-                return;
-            }
-            var rows = k.slice(0, 8).map(function (x) {
-                return '<tr><td>' + esc(x.type.replace('ecdsa-sha2-', 'ecdsa ').replace('ssh-', '')) + '</td><td>' + esc(x.fp) + '<br><small>' + esc(x.comment || '') + '</small></td></tr>';
-            }).join('');
-            message(T('Keys on this TV'), '<table class="keys">' + rows + '</table>'
-                + (k.length > 8 ? p(esc(T('And {n} more.', { n: k.length - 8 }))) : ''));
-        });
     }
 
     var actions = {
@@ -386,9 +746,13 @@
                 p(esc(T('Anyone on your network can use that password, so set up a key again soon.'))),
                 function () { act(T('Go back to password login'), 'password-on'); });
         },
-        pair: startPair,
+        pair: function () { startPair('key'); },
         howto: howTo,
-        keys: keysList,
+        keys: function () { keysMenu(); },
+        settings: function () { settingsMenu(); },
+        tools: toolsMenu,
+        apply: function () { act(T('Put my settings back'), 'apply', p(esc(T('SSH runs with your settings again.')))); },
+        hostfix: function () { act(T('Repair the TV\'s SSH keys'), 'hostkeys-reset', p(esc(T('Done.  New keys are made at the next login.')))); },
         restore: function () {
             var b = backups[backups.length - 1];
             if (!b) { return; }
@@ -426,9 +790,18 @@
 
     document.addEventListener('keydown', function (e) {
         var k = e.keyCode;
+        if (overlayMode === 'input') { inputKey(e); return; }
         if (overlayMode) {
             e.preventDefault();
             if (overlayMode === 'busy') { return; }
+            if (overlayMode === 'menu') {
+                var m = menuStack[menuStack.length - 1];
+                if (k === KEY.DOWN) { m.at = Math.min(m.at + 1, m.items.length - 1); markMenu(); }
+                else if (k === KEY.UP) { m.at = Math.max(m.at - 1, 0); markMenu(); }
+                else if (k === KEY.ENTER) { pickMenu(); }
+                else if (isBack(k)) { menuBack(); }
+                return;
+            }
             if (overlayMode === 'pair') {
                 if (k === KEY.ENTER && onConfirm) { var a = onConfirm; onConfirm = null; a(); }
                 else if (isBack(k)) {
@@ -438,7 +811,7 @@
                 return;
             }
             if (k === KEY.ENTER && overlayMode === 'confirm' && onConfirm) { var fn = onConfirm; onConfirm = null; fn(); }
-            else if (k === KEY.ENTER || isBack(k)) { closeOverlay(); }
+            else if (k === KEY.ENTER || isBack(k)) { onConfirm = null; if (!reopenMenu()) { closeOverlay(); } }
             return;
         }
         var list = buttons();
@@ -459,9 +832,10 @@
             if (!overlayMode && !busy) { actions[btn.getAttribute('data-action')](); }
         });
     });
-    $('overlay').addEventListener('click', function () {
+    $('overlay').addEventListener('click', function (e) {
+        if (overlayMode === 'input' || overlayMode === 'menu') { return; }
         if ((overlayMode === 'confirm' || overlayMode === 'pair') && onConfirm) { var fn = onConfirm; onConfirm = null; fn(); }
-        else if (overlayMode === 'message') { closeOverlay(); }
+        else if (overlayMode === 'message') { if (!reopenMenu()) { closeOverlay(); } }
     });
 
     document.addEventListener('webOSRelaunch', function () { if (!busy && !pair) { refresh(); } });

@@ -23,7 +23,7 @@ const P = (m) => { problems++; console.log('PROBLEM ' + m); };
 
 const SMALL = /\b(the|is|are|was|it|this|that|and|but|or|to|of|on|in|with|your|for|key|keys|press|log|set|fix|turn|now|check|nobody|password)\b/i;
 const ENG = /[A-Za-z']{2,}(?:[ ,]+[A-Za-z'-]{2,}){2,}/;
-const OKW = /SSH Doctor|Homebrew Channel|LG-WEBOS-SSH-DOCTOR|github\.com\S*|root@\S+|ssh(-keygen)? [^\n]*|SHA256:\S+|ssh-ed25519|ssh-rsa|ecdsa[^\s]*|authorized_keys\S*|\/home\/root\S*|bob@\S+|lgtv-\S+|alpine|PowerShell|Terminal|Mac|Linux|Windows|Telnet|telnet|Node\.js|dropbear [0-9.]+|REMOTE HOST IDENTIFICATION HAS CHANGED|crlf|private|rootmy\.tv|-o/g;
+const OKW = /SSH Doctor|Homebrew Channel|LG-WEBOS-SSH-DOCTOR|github\.com\S*|root@\S+|ssh(-keygen)? [^\n]*|SHA256:\S+|ssh-ed25519|ssh-rsa|ecdsa[^\s]*|authorized_keys\S*|\/home\/root\S*|bob@\S+|lgtv-\S+|alpine|PowerShell|Terminal|Mac|Linux|Windows|Telnet|telnet|Node\.js|dropbear [0-9.]+|\/\S*\/(dropbear|sshd)[^\n]*|REMOTE HOST IDENTIFICATION HAS CHANGED|crlf|private|rootmy\.tv|-o/g;
 
 async function tv(b) {
     const work = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-ui-'));
@@ -31,8 +31,12 @@ async function tv(b) {
     fs.copyFileSync(path.join(ROOT, 'scripts/screenshots/demo.js'), path.join(work, 'app/demo.js'));
     const index = path.join(work, 'app/index.html');
     fs.writeFileSync(index, fs.readFileSync(index, 'utf8').replace('<script src="app.js">', '<script src="demo.js"></script>\n<script src="app.js">'));
+    // SD_UI_ONLY=ru:custom checks just that language and TV
+    const only = (process.env.SD_UI_ONLY || '').split(':');
     for (const lang of ['en', 'ru', 'es']) {
-        for (const s of ['healthy', 'alpine', 'locked', 'off', 'messy']) {
+        if (only[0] && only[0] !== lang) { continue; }
+        for (const s of ['healthy', 'alpine', 'locked', 'off', 'messy', 'custom']) {
+            if (only[1] && only[1] !== s) { continue; }
             const c = await b.newContext({ viewport: { width: 1920, height: 1080 } });
             const p = await c.newPage();
             const errs = [];
@@ -82,7 +86,45 @@ async function tv(b) {
                 await check('after ' + a);
                 if (OUT && s === 'healthy') { await p.screenshot({ path: path.join(OUT, `tv-${lang}-${a}.png`) }); }
                 const mode = await p.evaluate(() => document.getElementById('overlay-hint').textContent);
-                if (a === 'pair') {
+                const isMenu = await p.evaluate(() => !!document.querySelector('#overlay:not(.hidden) .menu'));
+                if (isMenu) {
+                    // Every row of the menu, and one level below it
+                    const rows = await p.evaluate(() => document.querySelectorAll('.mrow').length);
+                    const title = await p.evaluate(() => document.getElementById('overlay-title').textContent);
+                    for (let i = 0; i < rows; i++) {
+                        const there = await p.evaluate((t) => !!document.querySelector('#overlay:not(.hidden) .menu') && document.getElementById('overlay-title').textContent === t, title);
+                        if (!there) {
+                            for (let j = 0; j < 3; j++) { await p.keyboard.press('Escape'); await p.waitForTimeout(120); }
+                            await p.evaluate(() => { const o = document.getElementById('overlay'); if (!o.classList.contains('hidden')) { o.className = 'overlay hidden'; } });
+                            await p.evaluate((x) => document.querySelector('[data-action="' + x + '"]').click(), a);
+                            await p.waitForTimeout(500);
+                        }
+                        for (let j = 0; j < i; j++) { await p.keyboard.press('ArrowDown'); }
+                        await p.keyboard.press('Enter');
+                        await p.waitForTimeout(600);
+                        await check('after ' + a + ' row ' + i);
+                        if (OUT && lang === 'en' && s === 'custom') { await p.screenshot({ path: path.join(OUT, `tv-${a}-${i}.png`) }); }
+                        const sub = await p.evaluate(() => !!document.querySelector('#overlay:not(.hidden) .menu') ? document.querySelectorAll('.mrow').length : 0);
+                        const subTitle = await p.evaluate(() => document.getElementById('overlay-title').textContent);
+                        if (sub && subTitle !== title) {
+                            for (let k = 0; k < sub; k++) {
+                                for (let j = 0; j < k; j++) { await p.keyboard.press('ArrowDown'); }
+                                await p.keyboard.press('Enter');
+                                await p.waitForTimeout(500);
+                                await check('after ' + a + ' row ' + i + '.' + k);
+                                await p.keyboard.press('Escape');
+                                await p.waitForTimeout(200);
+                                const still = await p.evaluate((t) => document.getElementById('overlay-title').textContent === t, subTitle);
+                                if (!still) { break; }
+                                for (let j = 0; j < 8; j++) { await p.keyboard.press('ArrowUp'); }
+                            }
+                        }
+                        await p.keyboard.press('Escape');
+                        await p.waitForTimeout(200);
+                        const back = await p.evaluate((t) => document.getElementById('overlay-title').textContent === t, title);
+                        if (back) { for (let j = 0; j < 12; j++) { await p.keyboard.press('ArrowUp'); } }
+                    }
+                } else if (a === 'pair') {
                     // Let the made-up phone connect and send its key
                     await p.waitForTimeout(10500);
                     await check('pair pending');
@@ -170,9 +212,48 @@ async function pairing(b) {
         if (OUT) { await p.screenshot({ path: path.join(OUT, `pair-${vp.name}-4.png`), fullPage: true }); }
         const ak = fs.readFileSync(path.join(T, 'root/home/root/.ssh/authorized_keys'), 'utf8');
         if (ak.indexOf(pub.split(' ')[1]) < 0) { P(`pair ${vp.name}: key not in authorized_keys`); }
+        const conf = await p.textContent('#config');
+        if (!/Host lgtv/.test(conf) || !/IdentityFile ~\/.ssh\/lgtv_ed25519/.test(conf)) { P(`pair ${vp.name}: ssh config: ${conf}`); }
         const over = await p.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
         if (over) { P(`pair ${vp.name}: page wider than the screen`); }
         if (errs.length) { P(`pair ${vp.name}: page errors ${JSON.stringify(errs)}`); }
+        await c.close();
+    }
+    sd(['pair-stop']);
+
+    // A password typed on a phone: only the hash reaches the TV, and it checks out
+    const pw = 'correct horse 42';
+    const ps = JSON.parse(sd(['pair-start', 'password']));
+    {
+        const c = await b.newContext({ viewport: { width: 390, height: 844 }, isMobile: true });
+        const p = await c.newPage();
+        const errs = [];
+        const posted = [];
+        p.on('pageerror', (e) => errs.push(String(e)));
+        p.on('request', (r) => { if (r.method() === 'POST') { posted.push(r.postData() || ''); } });
+        await p.goto('http://127.0.0.1:' + ps.port + '/');
+        await p.fill('#code', ps.code);
+        await p.click('#code-go');
+        await p.waitForSelector('#pw1', { state: 'visible', timeout: 5000 }).catch(() => P('pair password: password step not shown'));
+        if (OUT) { await p.screenshot({ path: path.join(OUT, 'pair-phone-password.png'), fullPage: true }); }
+        await p.fill('#pw1', 'short');
+        await p.fill('#pw2', 'short');
+        await p.click('#pw-go');
+        if (!/8 characters/.test(await p.textContent('#pw-msg'))) { P('pair password: short password not refused'); }
+        await p.fill('#pw1', pw);
+        await p.fill('#pw2', pw);
+        await p.click('#pw-go');
+        await p.waitForSelector('#step-confirm', { state: 'visible', timeout: 8000 }).catch(() => P('pair password: confirm step not shown'));
+        if (posted.some((x) => x.indexOf(pw) >= 0)) { P('pair password: the password itself was sent'); }
+        const tv = JSON.parse(sd(['pair-status']));
+        if (tv.state !== 'pending' || !tv.password) { P('pair password: TV sees ' + JSON.stringify(tv)); }
+        sd(['pair-accept']);
+        await p.waitForSelector('#step-done', { state: 'visible', timeout: 8000 }).catch(() => P('pair password: done step not shown'));
+        const sh = fs.readFileSync(path.join(T, 'root/etc/shadow'), 'utf8');
+        const hash = (sh.match(/^root:([^:]*):/m) || [])[1] || '';
+        const ok = cp.execFileSync('python3', ['-c', 'import ctypes,ctypes.util,sys\nl=ctypes.CDLL(ctypes.util.find_library("crypt"))\nl.crypt.restype=ctypes.c_char_p\nprint(l.crypt(sys.argv[1].encode(), sys.argv[2].encode()).decode()==sys.argv[2])', pw, hash]).toString().trim();
+        if (ok !== 'True') { P('pair password: shadow hash ' + hash + ' does not match the password'); }
+        if (errs.length) { P('pair password: page errors ' + JSON.stringify(errs)); }
         await c.close();
     }
     sd(['pair-stop']);
@@ -182,8 +263,9 @@ async function pairing(b) {
 (async () => {
     if (OUT) { fs.mkdirSync(OUT, { recursive: true }); }
     const b = await chromium.launch();
-    await tv(b);
-    await pairing(b);
+    // SD_UI_ONLY=pair checks just the pairing page
+    if (process.env.SD_UI_ONLY !== 'pair') { await tv(b); }
+    if (!process.env.SD_UI_ONLY || process.env.SD_UI_ONLY === 'pair') { await pairing(b); }
     await b.close();
     console.log('problems: ' + problems);
     process.exit(problems ? 1 : 0);

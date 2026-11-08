@@ -1,10 +1,17 @@
 #!/bin/sh
 # Stands in for the Homebrew Channel's dropbear in the tests: -V prints a
-# version, and starting it adds a dropbear process and a listener on port 22
-# to the fake /proc.
+# version, and starting it adds a dropbear process to the fake /proc,
+# listening on its -p ports (22 by default).  FAKE_DB_FAIL=PORT: won't start
+# when asked for that port.
 case "${1:-}" in
     -V) echo "Dropbear v${FAKE_DB_VER:-2022.83}" >&2; exit 0 ;;
 esac
-mkdir -p "$SD_ROOT/proc/4242"
-echo dropbear > "$SD_ROOT/proc/4242/comm"
-echo '   0: 00000000:0016 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0' >> "$SD_ROOT/proc/net/tcp"
+[ -n "${FAKE_DB_FAIL:-}" ] && case " $* " in *" -p $FAKE_DB_FAIL "*) exit 1 ;; esac
+# shellcheck source=/dev/null
+. "$(dirname "$0")/fakeproc.sh"
+_ports=''
+_prev=''
+for a in "$@"; do [ "$_prev" = -p ] && _ports="$_ports ${a##*:}"; _prev=$a; done
+[ -n "$_ports" ] || _ports=22
+# shellcheck disable=SC2086
+fake_proc dropbear "$0 $*" 1 $_ports > /dev/null

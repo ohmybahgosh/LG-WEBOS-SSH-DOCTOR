@@ -1,0 +1,5 @@
+#!/bin/sh
+# Stands in for the Homebrew Channel's telnetd in the tests
+# shellcheck source=/dev/null
+. "$(dirname "$0")/fakeproc.sh"
+fake_proc telnetd "$0 $*" 1 23 > /dev/null

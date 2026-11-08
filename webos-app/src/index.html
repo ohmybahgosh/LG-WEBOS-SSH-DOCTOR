@@ -24,11 +24,14 @@
     <section class="actions" id="actions">
       <div class="btn fix" tabindex="0" data-action="sshon" style="display:none"><span>Turn SSH on now<small>no restart needed</small></span></div>
       <div class="btn fix" tabindex="0" data-action="fixkeys" style="display:none"><span>Fix my keys file<small>keeps a backup</small></span></div>
+      <div class="btn fix" tabindex="0" data-action="apply" style="display:none"><span>Put my settings back<small>restart SSH with them</small></span></div>
+      <div class="btn fix" tabindex="0" data-action="hostfix" style="display:none"><span>Repair the TV's SSH keys<small>keeps a backup</small></span></div>
+      <div class="btn fix" tabindex="0" data-action="password" style="display:none"><span>Go back to password login<small>if you're locked out</small></span></div>
       <div class="btn" tabindex="0" data-action="pair"><span>Set up a key<small>from your computer or phone</small></span></div>
       <div class="btn" tabindex="0" data-action="howto"><span>How to log in<small>the command for your computer</small></span></div>
       <div class="btn" tabindex="0" data-action="keys"><span>Keys on this TV<small id="keys-hint"></small></span></div>
-      <div class="btn" tabindex="0" data-action="password"><span>Go back to password login<small>if you're locked out</small></span></div>
-      <div class="btn" tabindex="0" data-action="restore" style="display:none"><span>Undo a change<small>put a backup back</small></span></div>
+      <div class="btn" tabindex="0" data-action="settings"><span>SSH settings<small id="settings-hint"></small></span></div>
+      <div class="btn" tabindex="0" data-action="tools"><span>More tools<small>logins, telnet, files, help</small></span></div>
       <div class="btn" tabindex="0" data-action="lang"><span>Language<small id="lang-hint"></small></span></div>
     </section>
   </main>
@@ -50,6 +53,8 @@
 </div>
 
 <script src="vendor/qrcode.js"></script>
+<script src="assets/nacl-fast.min.js"></script>
+<script src="assets/sha512crypt.js"></script>
 <script src="i18n.js"></script>
 <script src="app.js"></script>
 </body>

@@ -139,8 +139,29 @@ if (require.main === module) {
         });
         if (json) { console.log(JSON.stringify(keys)); }
         else { keys.forEach(function (k) { console.log(k.type + ' ' + k.fp + (k.comment ? ' ' + k.comment : '')); }); }
+    } else if (cmd === 'hostpub') {
+        // The TV's public host keys, as known_hosts would hold them
+        var hk = hostKeys(arg);
+        if (json || process.argv[4] === '--json') { console.log(JSON.stringify(hk)); }
+        else { hk.forEach(function (k) { console.log(k.line + ' ' + k.fp); }); }
+    } else if (cmd === 'edit') {
+        // edit FILE remove FP | edit FILE rename FP NAME: the new file on stdout
+        var what = process.argv[4], fp = process.argv[5], name = process.argv[6] || '';
+        var hit = 0;
+        var out = [];
+        String(fs.readFileSync(arg)).split('\n').forEach(function (l) {
+            var k = parseLine(l);
+            if (!k || k.fp !== fp) { out.push(l); return; }
+            hit++;
+            if (what === 'rename') {
+                var nm = String(name).replace(/[^\x20-\x7e]/g, '').replace(/\s+/g, ' ').replace(/^ | $/g, '').slice(0, 60);
+                out.push((k.options ? k.options + ' ' : '') + k.type + ' ' + k.blob + (nm ? ' ' + nm : ''));
+            }
+        });
+        if (!hit || (what !== 'remove' && what !== 'rename')) { process.exit(3); }
+        process.stdout.write(out.join('\n'));
     } else {
-        console.error('Usage: node keyinfo.js host DIR | list FILE [--json]');
+        console.error('Usage: node keyinfo.js host DIR | hostpub DIR [--json] | list FILE [--json] | edit FILE remove FP | edit FILE rename FP NAME');
         process.exit(2);
     }
 }
