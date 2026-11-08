@@ -1,0 +1,10 @@
+#!/bin/sh
+# Stands in for the Homebrew Channel's dropbear in the tests: -V prints a
+# version, and starting it adds a dropbear process and a listener on port 22
+# to the fake /proc.
+case "${1:-}" in
+    -V) echo "Dropbear v${FAKE_DB_VER:-2022.83}" >&2; exit 0 ;;
+esac
+mkdir -p "$SD_ROOT/proc/4242"
+echo dropbear > "$SD_ROOT/proc/4242/comm"
+echo '   0: 00000000:0016 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0' >> "$SD_ROOT/proc/net/tcp"

@@ -1,0 +1,90 @@
+/* Laid out for a 1920x1080 TV screen, in LG-USB-2-ETH0's style */
+* { box-sizing: border-box; }
+html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; }
+body {
+  background: radial-gradient(1200px 700px at 75% 40%, rgba(34, 229, 132, .12), transparent),
+              linear-gradient(135deg, #0e1513, #0a0d0c);
+  color: #e8efeb;
+  font-family: "LG Smart UI", "Museo Sans", Inter, "Segoe UI", Helvetica, Arial, sans-serif;
+}
+.mono, table, .meta, .panel-body pre, code { font-family: "DejaVu Sans Mono", "Liberation Mono", Menlo, Consolas, monospace; }
+
+#app { padding: 80px 110px; height: 100%; position: relative; }
+header { display: flex; align-items: center; }
+header img { width: 96px; height: 96px; margin-right: 28px; }
+header h1 { font-size: 54px; margin: 0; font-weight: 800; letter-spacing: -1px; }
+.meta { margin-left: auto; font-size: 22px; font-weight: 600; color: #6f7f78; }
+
+main { display: flex; margin-top: 48px; }
+.card {
+  flex: 1.25; margin-right: 48px; background: #111a17; border: 1px solid rgba(255, 255, 255, .07);
+  border-radius: 28px; padding: 40px 44px; min-height: 700px; max-height: 730px; overflow: hidden;
+}
+.actions { flex: 1; }
+
+.hero { display: flex; align-items: center; }
+.hero b { font-size: 44px; }
+.dot { width: 30px; height: 30px; border-radius: 50%; margin-right: 26px; flex: none; }
+.dot-ok { background: #22e584; box-shadow: 0 0 30px #22e584; }
+.dot-warn { background: #febc2e; box-shadow: 0 0 30px #febc2e; }
+.dot-bad { background: #ff5f57; box-shadow: 0 0 30px #ff5f57; }
+.dot-wait { background: #6f7f78; }
+.sub { color: #93a39b; font-size: 26px; margin: 10px 0 26px; min-height: 34px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+
+table { width: 100%; border-collapse: collapse; font-size: 25px; }
+td { padding: 12px 0; border-top: 1px solid rgba(255, 255, 255, .06); vertical-align: top; }
+td:first-child { color: #6f7f78; width: 34%; }
+.ok { color: #22e584; }
+.warn { color: #febc2e; }
+.bad { color: #ff5f57; }
+.card.compact td { padding: 7px 0; }
+
+#findings { list-style: none; padding: 0; margin: 20px 0 0; font-size: 22px; }
+#findings li { padding: 0 0 0 30px; margin: 6px 0 12px; position: relative; color: #c9d4cf; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+#findings li:before { content: "!"; position: absolute; left: 6px; top: 0; color: #ff5f57; font-weight: 800; }
+#findings li.tip { color: #93a39b; }
+#findings li.tip:before { content: "•"; color: #febc2e; }
+
+.btn {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 30px; font-weight: 600; padding: 19px 32px; border-radius: 20px;
+  background: #16201c; margin-bottom: 14px; border: 3px solid transparent; outline: none;
+}
+.btn small { display: block; font-size: 20px; color: #6f7f78; font-weight: 500; margin-top: 4px; }
+.btn:focus, .btn.focus { border-color: #22e584; background: #183026; box-shadow: 0 0 0 6px rgba(34, 229, 132, .15); }
+.btn.fix { background: #13261d; box-shadow: inset 0 0 0 2px rgba(34, 229, 132, .35); color: #22e584; }
+.actions.tight .btn { padding-top: 12px; padding-bottom: 12px; margin-bottom: 10px; font-size: 28px; }
+.actions.tight .btn small { font-size: 18px; margin-top: 2px; }
+.actions.tighter .btn { padding-top: 8px; padding-bottom: 8px; margin-bottom: 8px; font-size: 27px; }
+.actions.tighter .btn small { font-size: 17px; margin-top: 0; }
+/* With several findings they get shorter, so the card keeps its size */
+.card.compact #findings li { -webkit-line-clamp: 2; font-size: 21px; margin-bottom: 8px; }
+
+footer { position: absolute; bottom: 56px; left: 110px; right: 110px; display: flex; color: #6f7f78; font-size: 22px; }
+footer > span { margin-right: 40px; }
+footer .right { margin: 0 0 0 auto; }
+.k { display: inline-block; padding: 4px 12px; border-radius: 8px; background: #1d2723; color: #c9d4cf; margin-right: 10px; font-weight: 700; }
+
+.overlay { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; background: rgba(5, 8, 7, .86); display: flex; align-items: center; justify-content: center; }
+.hidden { display: none; }
+.panel { width: 1240px; background: #111a17; border: 1px solid rgba(255, 255, 255, .1); border-radius: 28px; padding: 48px 56px; }
+.panel-title { font-size: 38px; font-weight: 800; margin-bottom: 20px; }
+.panel-body { font-size: 25px; color: #c9d4cf; line-height: 1.45; }
+.panel-body p { margin: 0 0 14px; }
+.panel-body pre { white-space: pre-wrap; word-break: break-all; font-size: 22px; color: #e8efeb; background: #0b110f; border-radius: 12px; padding: 12px 18px; margin: 6px 0 16px; }
+.panel-hint { margin-top: 28px; color: #6f7f78; font-size: 22px; }
+.spinner { width: 54px; height: 54px; border: 6px solid #2b3632; border-top-color: #22e584; border-radius: 50%; animation: spin 1s linear infinite; display: inline-block; vertical-align: middle; margin-right: 24px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Pairing: QR code on the left, the code to type on the right */
+.pair { display: flex; align-items: center; }
+.pair svg { width: 440px; height: 440px; background: #fff; border-radius: 18px; margin-right: 52px; flex: none; }
+.pair-side { flex: 1; }
+.pair-label { font-size: 22px; color: #6f7f78; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; }
+.pair-code { font-family: "DejaVu Sans Mono", "Liberation Mono", Menlo, Consolas, monospace; font-size: 110px; font-weight: 800; letter-spacing: 10px; color: #22e584; margin: 4px 0 22px; }
+.pair-url { font-family: "DejaVu Sans Mono", "Liberation Mono", Menlo, Consolas, monospace; font-size: 34px; color: #e8efeb; margin: 4px 0 22px; word-break: break-all; }
+.pair-state { font-size: 25px; color: #93a39b; }
+.fp { font-family: "DejaVu Sans Mono", "Liberation Mono", Menlo, Consolas, monospace; font-size: 26px; color: #e8efeb; word-break: break-all; background: #0b110f; border-radius: 12px; padding: 14px 18px; margin: 10px 0 18px; }
+.keys { width: 100%; font-size: 21px; }
+.keys td { padding: 10px 14px 10px 0; }
+.keys td:first-child { width: 20%; }

@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>SSH key for your LG TV</title>
+<style>
+:root { --bg: #0e1513; --card: #16201d; --line: #26332f; --text: #e8f0ec; --dim: #9fb3aa; --green: #3ddc97; --red: #ff6b6b; --amber: #ffb547; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 17px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+main { max-width: 640px; margin: 0 auto; padding: 24px 16px 48px; }
+h1 { font-size: 24px; margin: 8px 0 4px; }
+h2 { font-size: 19px; margin: 0 0 8px; }
+p { margin: 8px 0; }
+.dim { color: var(--dim); font-size: 15px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px; margin: 16px 0; }
+.hidden { display: none; }
+input, textarea, button { font: inherit; color: inherit; }
+input[type=text] { width: 100%; padding: 14px; font-size: 28px; letter-spacing: 6px; text-align: center; text-transform: uppercase; background: #0b110f; border: 1px solid var(--line); border-radius: 10px; font-family: ui-monospace, Menlo, Consolas, monospace; }
+textarea { width: 100%; min-height: 110px; padding: 10px; background: #0b110f; border: 1px solid var(--line); border-radius: 10px; font: 13px/1.4 ui-monospace, Menlo, Consolas, monospace; }
+button { display: inline-block; margin: 10px 8px 0 0; padding: 12px 18px; border: 0; border-radius: 10px; background: var(--green); color: #06110c; font-weight: 600; cursor: pointer; }
+button.ghost { background: transparent; color: var(--green); border: 1px solid var(--green); }
+button:disabled { opacity: .5; cursor: default; }
+code, pre { font-family: ui-monospace, Menlo, Consolas, monospace; }
+pre { background: #0b110f; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; white-space: pre-wrap; word-break: break-all; font-size: 14px; margin: 6px 0; }
+.err { color: var(--red); }
+.ok { color: var(--green); }
+.warn { color: var(--amber); }
+.tabs button { margin: 0 6px 8px 0; padding: 8px 12px; background: transparent; color: var(--dim); border: 1px solid var(--line); font-weight: 500; }
+.tabs button.on { color: var(--text); border-color: var(--green); }
+.fp { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 14px; word-break: break-all; }
+footer { margin-top: 32px; font-size: 13px; color: var(--dim); }
+footer a { color: var(--dim); }
+</style>
+</head>
+<body>
+<main>
+  <h1 data-t>SSH key for your LG TV</h1>
+  <p class="dim" data-t>From LG webOS SSH Doctor, running on your TV.</p>
+
+  <section id="step-code" class="card">
+    <h2 data-t>1. Enter the code on your TV</h2>
+    <input id="code" type="text" maxlength="7" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABC-123" aria-label="Code">
+    <button id="code-go" data-t>Connect</button>
+    <p id="code-msg" class="err"></p>
+  </section>
+
+  <section id="step-key" class="hidden">
+    <div class="card">
+      <h2 data-t>2. Choose a key</h2>
+      <p data-t>Don't have one, or not sure?  Let this page make one.  The private half is saved on this device only and never leaves it.</p>
+      <button id="make" data-t>Make me a key</button>
+      <p id="make-msg" class="dim"></p>
+    </div>
+    <div class="card">
+      <h2 data-t>Or use a key you already have</h2>
+      <p class="dim" data-t>Pick or paste your public key: the file that ends in .pub, like id_ed25519.pub in the .ssh folder of your home folder.  Never the file without .pub.</p>
+      <p><input id="file" type="file" accept=".pub,text/plain"></p>
+      <textarea id="paste" spellcheck="false" placeholder="ssh-ed25519 AAAA... you@computer"></textarea>
+      <button id="send" class="ghost" data-t>Send this key</button>
+      <p id="send-msg" class="err"></p>
+    </div>
+  </section>
+
+  <section id="step-confirm" class="card hidden">
+    <h2 data-t>3. Press OK on your TV</h2>
+    <p data-t>Your TV is asking whether to add this key.  Check that the code matches, then press OK on the remote.</p>
+    <p class="fp" id="fp"></p>
+    <p id="confirm-msg" class="dim" data-t>Waiting for the TV...</p>
+  </section>
+
+  <section id="step-done" class="card hidden">
+    <h2 class="ok" data-t>Done: the key is on your TV</h2>
+    <p id="done-intro"></p>
+    <div class="tabs" id="tabs">
+      <button data-os="unix" data-t>Mac or Linux</button><button data-os="win" data-t>Windows</button><button data-os="putty" data-t>PuTTY</button><button data-os="phone" data-t>Phone</button>
+    </div>
+    <div id="howto"></div>
+    <p class="warn" id="alpine-note"></p>
+  </section>
+
+  <section id="step-end" class="card hidden">
+    <h2 id="end-title"></h2>
+    <p id="end-msg"></p>
+  </section>
+
+  <footer>
+    <a href="https://github.com/ohmybahgosh/LG-WEBOS-SSH-DOCTOR" rel="noreferrer">LG webOS SSH Doctor</a> by OhMyBahGosh
+  </footer>
+</main>
+<script src="nacl.js"></script>
+<script src="sshkey.js"></script>
+<script src="pair.js"></script>
+</body>
+</html>

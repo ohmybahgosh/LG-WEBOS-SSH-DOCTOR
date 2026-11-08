@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SSH Doctor</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <header>
+    <img src="icon160.png" alt="">
+    <h1>SSH Doctor</h1>
+    <span id="meta" class="meta">Loading…</span>
+  </header>
+
+  <main>
+    <section class="card" id="status">
+      <div class="hero"><span id="dot" class="dot dot-wait"></span><b id="headline">Checking SSH…</b></div>
+      <div id="subline" class="sub">Reading how SSH is set up on this TV.</div>
+      <table id="facts"></table>
+      <ul id="findings"></ul>
+    </section>
+
+    <section class="actions" id="actions">
+      <div class="btn fix" tabindex="0" data-action="sshon" style="display:none"><span>Turn SSH on now<small>no restart needed</small></span></div>
+      <div class="btn fix" tabindex="0" data-action="fixkeys" style="display:none"><span>Fix my keys file<small>keeps a backup</small></span></div>
+      <div class="btn" tabindex="0" data-action="pair"><span>Set up a key<small>from your computer or phone</small></span></div>
+      <div class="btn" tabindex="0" data-action="howto"><span>How to log in<small>the command for your computer</small></span></div>
+      <div class="btn" tabindex="0" data-action="keys"><span>Keys on this TV<small id="keys-hint"></small></span></div>
+      <div class="btn" tabindex="0" data-action="password"><span>Go back to password login<small>if you're locked out</small></span></div>
+      <div class="btn" tabindex="0" data-action="restore" style="display:none"><span>Undo a change<small>put a backup back</small></span></div>
+      <div class="btn" tabindex="0" data-action="lang"><span>Language<small id="lang-hint"></small></span></div>
+    </section>
+  </main>
+
+  <footer>
+    <span><span class="k">OK</span>Select</span>
+    <span><span class="k">▲ ▼</span>Move</span>
+    <span><span class="k">BACK</span>Exit</span>
+    <span class="right">github.com/ohmybahgosh/LG-WEBOS-SSH-DOCTOR</span>
+  </footer>
+</div>
+
+<div id="overlay" class="overlay hidden">
+  <div class="panel">
+    <div id="overlay-title" class="panel-title"></div>
+    <div id="overlay-body" class="panel-body"></div>
+    <div id="overlay-hint" class="panel-hint"></div>
+  </div>
+</div>
+
+<script src="vendor/qrcode.js"></script>
+<script src="i18n.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

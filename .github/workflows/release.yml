@@ -1,0 +1,52 @@
+name: Release
+
+# Push a tag like v0.1.0 and this publishes a GitHub release with the TV app
+# (IPK), its Homebrew Channel manifest, the script and SHA256SUMS, after the
+# tests pass.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+      - name: Install shells
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq busybox dash
+      - name: Test before releasing
+        run: |
+          shellcheck -s sh ssh-doctor.sh
+          sh tests/run.sh busybox
+          node tests/check-i18n.js
+      - name: Check the tag matches the script version
+        run: |
+          v=$(sed -n 's/^VERSION="\(.*\)"$/\1/p' ssh-doctor.sh)
+          [ "${GITHUB_REF_NAME#v}" = "$v" ] || { echo "Tag $GITHUB_REF_NAME does not match VERSION=$v"; exit 1; }
+      - name: Build the TV app (IPK) and its Homebrew Channel manifest
+        run: |
+          npm install -g @webos-tools/cli
+          sh webos-app/build.sh
+          cp webos-app/out/*.ipk webos-app/out/*.manifest.json .
+      - name: Build checksums
+        run: sha256sum ssh-doctor.sh *.ipk > SHA256SUMS
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes=$(awk -v v="${GITHUB_REF_NAME#v}" '
+            $0 ~ "^## \\[?" v { on = 1; next }
+            on && /^## / { exit }
+            on { print }' CHANGELOG.md)
+          gh release create "$GITHUB_REF_NAME" ssh-doctor.sh *.ipk *.manifest.json SHA256SUMS \
+            --title "LG webOS SSH Doctor $GITHUB_REF_NAME" \
+            --notes "${notes:-See CHANGELOG.md}"

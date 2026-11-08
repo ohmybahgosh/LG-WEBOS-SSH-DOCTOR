@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: ShellCheck the script (POSIX sh, like the TV)
+        run: shellcheck -s sh ssh-doctor.sh tests/fakebin/* webos-app/build.sh
+      - name: ShellCheck the test suite
+        run: shellcheck -s sh tests/run.sh
+      - name: Script parses under dash and busybox sh
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq busybox dash
+          dash -n ssh-doctor.sh
+          busybox sh -n ssh-doctor.sh
+
+  test:
+    name: Tests (${{ matrix.shell }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shell: [busybox, dash, bash]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+      - name: Install shells
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq busybox dash
+      - name: Run the test suite
+        run: sh tests/run.sh ${{ matrix.shell }}
+
+  app:
+    name: TV app and pairing page
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+      - name: The JavaScript parses
+        run: for f in webos-app/src/*.js *.js webos-app/gen-manifest.js tests/*.js scripts/screenshots/*.js; do node --check "$f" || exit 1; done
+      - name: Every text is translated
+        run: node tests/check-i18n.js
+      - name: Build the IPK and manifest
+        run: |
+          npm install -g @webos-tools/cli
+          sh webos-app/build.sh
+      - name: Keys made by the pairing page are real OpenSSH keys
+        run: node tests/check-sshkey.js .cache/tweetnacl-1.0.3-nacl-fast.min.js
+      - name: TV screens and the pairing page in a browser
+        run: |
+          npm install --no-save playwright@1.48.2
+          npx playwright install --with-deps chromium
+          node tests/ui-check.js
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ipk
+          path: webos-app/out/

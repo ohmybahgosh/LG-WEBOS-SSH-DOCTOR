@@ -1,0 +1,15 @@
+{
+    "id": "org.ohmybahgosh.sshdoctor",
+    "version": "0.1.0",
+    "vendor": "OhMyBahGosh",
+    "type": "web",
+    "main": "index.html",
+    "title": "SSH Doctor",
+    "icon": "icon80.png",
+    "largeIcon": "icon130.png",
+    "iconColor": "#0e1513",
+    "bgColor": "#0e1513",
+    "appDescription": "Check and fix SSH on a rooted LG TV",
+    "disableBackHistoryAPI": true,
+    "resolution": "1920x1080"
+}
