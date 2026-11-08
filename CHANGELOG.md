@@ -2,6 +2,12 @@
 
 All notable changes to LG webOS SSH Doctor.  Versions follow [semantic versioning](https://semver.org/).
 
+## Unreleased
+
+### Changed
+
+- **New icon.**  A bigger, easier to read "ssh" on the dark tile, so it stands out in the TV launcher.
+
 ## [0.1.0] - 2026-11-08
 
 ### Added
