@@ -408,7 +408,8 @@ servers_json() {
 
 # The running Homebrew Channel dropbear's options, to compare with ours
 running_flags() {
-    _m=$(hbc_masters | head -n 1)
+    # awk, not head: head closing the pipe early makes some shells' printf fail
+    _m=$(hbc_masters | awk 'NR == 1')
     [ -n "$_m" ] || return 0
     cmdline_of "$_m" | sed 's/^[^ ]*//; s/^ *//'
 }
@@ -469,6 +470,8 @@ shadow_with() {
     if [ -z "${SD_NOMOUNT:-}" ] && grep -q ' /etc/shadow ' /proc/mounts 2>/dev/null; then
         umount /etc/shadow 2>/dev/null
     fi
+    # Read-only from last time; rm so non-root test runs can write it again
+    rm -f "$RUN/shadow"
     sed -r 's|^root:[^:]*:|root:'"$1"':|' "$_src" > "$RUN/shadow"
     chmod 400 "$RUN/shadow"
     if [ -n "${SD_NOMOUNT:-}" ]; then
@@ -477,6 +480,7 @@ shadow_with() {
         mount --bind "$RUN/shadow" "$SHADOW" || die "Couldn't change root's password."
     fi
     if grep -q '^root:\*:' "$PASSWD" 2>/dev/null; then
+        rm -f "$RUN/passwd"
         sed 's/^root:\*:/root:x:/' "$PASSWD" > "$RUN/passwd"
         chmod 444 "$RUN/passwd"
         if [ -n "${SD_NOMOUNT:-}" ]; then cat "$RUN/passwd" > "$PASSWD"; else mount --bind "$RUN/passwd" "$PASSWD"; fi
