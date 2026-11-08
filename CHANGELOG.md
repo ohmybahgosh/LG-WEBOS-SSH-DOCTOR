@@ -2,7 +2,7 @@
 
 All notable changes to LG webOS SSH Doctor.  Versions follow [semantic versioning](https://semver.org/).
 
-## Unreleased
+## [0.2.0] - 2026-11-08
 
 ### Added
 
@@ -20,6 +20,9 @@ All notable changes to LG webOS SSH Doctor.  Versions follow [semantic versionin
 
 - **New icon.**  A bigger, easier to read "ssh" on the dark tile, so it stands out in the TV launcher.
 - The main screen is shorter: rarer actions moved to **More tools**, and **Go back to password login** shows up front when you're locked out.
+- Checking is faster: the TV's process list is read with one `grep` instead of a command per process.
+
+Tested on a real TV (webOS 25): a port change with both ports open, your own password, keys only and keepalive, all back after a restart, then a reset to the Homebrew Channel's defaults that left the keys file byte for byte the same.
 
 ## [0.1.0] - 2026-11-08
 

@@ -98,14 +98,9 @@ find_node() {
 
 # ------------------------------------------------------------------ checks
 
-# Is a dropbear process running?  Reads /proc, no ps needed
-dropbear_running() {
-    for c in "$PROC"/[0-9]*/comm; do
-        [ -f "$c" ] || continue
-        [ "$(cat "$c" 2>/dev/null)" = dropbear ] && return 0
-    done
-    return 1
-}
+# One grep over every process's name: a loop with cat per process takes
+# seconds on a busy TV
+procs_named() { grep -l -x -E "$1" "$PROC"/[0-9]*/comm 2>/dev/null; }
 
 # Is anything listening on TCP port $1?  (state 0A = LISTEN)
 listening() {
@@ -138,13 +133,7 @@ password_state() {
     esac
 }
 
-telnet_running() {
-    for c in "$PROC"/[0-9]*/comm; do
-        [ -f "$c" ] || continue
-        [ "$(cat "$c" 2>/dev/null)" = telnetd ] && return 0
-    done
-    return 1
-}
+telnet_running() { [ -n "$(procs_named telnetd)" ]; }
 
 perm_of() { stat -c %a "$1" 2>/dev/null; }
 owner_of() { stat -c %u "$1" 2>/dev/null; }
@@ -333,10 +322,9 @@ dropbear_flags() {
 
 # "PID PPID COMM" for each dropbear, sshd and telnetd process
 ssh_procs() {
-    for _d in "$PROC"/[0-9]*; do
-        [ -f "$_d/comm" ] || continue
-        _c=$(cat "$_d/comm" 2>/dev/null)
-        case "$_c" in dropbear|sshd|telnetd) ;; *) continue ;; esac
+    for _cf in $(procs_named 'dropbear|sshd|telnetd'); do
+        _d=${_cf%/comm}
+        _c=$(cat "$_cf" 2>/dev/null) || continue
         _pp=$(sed 's/^.*) [A-Za-z] \([0-9]*\).*/\1/' "$_d/stat" 2>/dev/null)
         say "${_d##*/} ${_pp:-0} $_c"
     done
@@ -379,14 +367,21 @@ server_kind() {
     say other
 }
 
-# "PID KIND NAME PORTS..." per SSH server (not telnet)
+# "PID KIND NAME PORTS..." per SSH server (not telnet).  Kept for the rest
+# of this run, since a status check asks several times; servers_fresh forgets
+# it after starting or stopping a server
 servers_list() {
-    server_pids | while read -r _p _c; do
-        [ "$_c" = telnetd ] && continue
-        _ps=$(ports_of "$_p")
-        say "$_p $(server_kind "$_p" "$_c" "$_ps") $_c $_ps"
-    done
+    if [ ! -f "$RUN/servers.$$" ]; then
+        server_pids | while read -r _p _c; do
+            [ "$_c" = telnetd ] && continue
+            _ps=$(ports_of "$_p")
+            say "$_p $(server_kind "$_p" "$_c" "$_ps") $_c $_ps"
+        done > "$RUN/servers.$$.tmp"
+        mv "$RUN/servers.$$.tmp" "$RUN/servers.$$"
+    fi
+    cat "$RUN/servers.$$"
 }
+servers_fresh() { rm -f "$RUN/servers.$$"; }
 
 hbc_masters() { servers_list | awk '$2 == "hbc" { print $1 }'; }
 
@@ -424,6 +419,7 @@ settings_applied() {
 # separate processes) and start it again with our options.  If it won't come
 # up that way, start it the Homebrew Channel's way so SSH isn't left off.
 kill_pid() {
+    servers_fresh
     if [ -n "$R" ]; then
         # The tests' fake /proc
         # shellcheck source=/dev/null
@@ -447,10 +443,10 @@ restart_dropbear() {
     done
     for _m in $(hbc_masters); do kill_pid "$_m"; done
     _i=0
-    while [ $_i -lt 10 ] && [ -n "$(hbc_masters)" ]; do sleep 0.3 2>/dev/null || sleep 1; _i=$((_i + 1)); done
+    while [ $_i -lt 10 ] && [ -n "$(hbc_masters)" ]; do sleep 0.3 2>/dev/null || sleep 1; _i=$((_i + 1)); servers_fresh; done
     mkdir -p "$HOSTKEYS"
     # shellcheck disable=SC2046
-    "$DROPBEAR" $(dropbear_flags)
+    "$DROPBEAR" $(dropbear_flags); servers_fresh
     _i=0
     while [ $_i -lt 20 ]; do
         _ok=1
@@ -459,7 +455,7 @@ restart_dropbear() {
         sleep 0.5 2>/dev/null || sleep 1; _i=$((_i + 1))
     done
     for _m in $(hbc_masters); do kill_pid "$_m"; done
-    "$DROPBEAR" -R
+    "$DROPBEAR" -R; servers_fresh
     die "The SSH server didn't start with these settings, so it was started the usual way, on port 22."
 }
 
@@ -533,7 +529,7 @@ boot() {
     while [ $_i -lt 90 ] && [ -f "$FAILSAFE" ]; do sleep 1; _i=$((_i + 1)); done
     [ -f "$FAILSAFE" ] && { say "$(date): the failsafe flag stayed, so the settings weren't applied."; return 0; }
     _i=0
-    while [ $_i -lt 30 ] && [ -f "$SSHD_FLAG" ] && [ -z "$(hbc_masters)" ]; do sleep 1; _i=$((_i + 1)); done
+    while [ $_i -lt 30 ] && [ -f "$SSHD_FLAG" ] && [ -z "$(hbc_masters)" ]; do sleep 1; _i=$((_i + 1)); servers_fresh; done
     say "$(date): applying $(dropbear_flags)"
     apply
 }
@@ -715,7 +711,7 @@ ssh_on() {
     # any settings made here
     mkdir -p "$HOSTKEYS"
     # shellcheck disable=SC2046
-    "$DROPBEAR" $(dropbear_flags)
+    "$DROPBEAR" $(dropbear_flags); servers_fresh
     _i=0
     while [ $_i -lt 10 ]; do
         listening "$_sp" && { say "Started the SSH server on port $_sp."; return 0; }
@@ -1044,7 +1040,7 @@ telnet_on() {
     rm -f "$TELNET_OFF"
     if telnet_running; then say "Telnet is on."; return 0; fi
     [ -x "$TELNETD" ] || die "The Homebrew Channel's telnet server is missing."
-    "$TELNETD" -l /bin/sh
+    "$TELNETD" -l /bin/sh; servers_fresh
     say "Turned telnet on, on port 23 (no password, like the Homebrew Channel's)."
 }
 
@@ -1158,6 +1154,8 @@ pair_reject() {
 CMD=${1:-status}
 [ $# -gt 0 ] && shift
 mkdir -p "$RUN" 2>/dev/null
+# This run's scratch files, even if it stops early
+trap 'rm -f "$RUN"/*."$$" "$RUN"/*."$$".tmp 2>/dev/null' EXIT
 case "$CMD" in
     status) if [ "${1:-}" = --json ]; then status_json; else status_text; fi ;;
     ssh-on) ssh_on ;;
