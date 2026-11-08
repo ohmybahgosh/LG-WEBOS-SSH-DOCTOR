@@ -1,0 +1,31 @@
+title: "[Question]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Questions and setup help live here.  Something broken goes to a [bug report](https://github.com/ohmybahgosh/LG-WEBOS-SSH-DOCTOR/issues/new?template=bug-report.yml).
+
+        The [README](https://github.com/ohmybahgosh/LG-WEBOS-SSH-DOCTOR#readme) may already answer it, and the app's **How to log in** shows the exact command for your TV.
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+      description: What you're trying to do, and what you've tried so far.
+    validations:
+      required: true
+  - type: input
+    id: tv
+    attributes:
+      label: TV model and webOS version
+      description: For example "OLED65C2PUA, webOS 25".
+  - type: input
+    id: client
+    attributes:
+      label: What you log in from
+      description: For example "Windows 11, PowerShell", "PuTTY", "Termius on iPhone".
+  - type: textarea
+    id: report
+    attributes:
+      label: Report (optional)
+      description: From **More tools > Report for getting help** in the app, or `sh ssh-doctor.sh report`.  Never post private keys or passwords.
+      render: text

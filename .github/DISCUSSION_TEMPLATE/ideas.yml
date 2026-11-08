@@ -1,0 +1,43 @@
+title: "[Idea]: "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ideas and feature requests live here, where they're collected and discussed until work on one starts (then it becomes an issue).
+
+        Check the [changelog](https://github.com/ohmybahgosh/LG-WEBOS-SSH-DOCTOR/blob/main/CHANGELOG.md) first: it may already be done.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The situation, not the solution yet.  "I share the TV with roommates and want to see who logged in."
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help?
+      description: How you'd like it to work, in the TV app, the pairing page or the script.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - The check and repairs
+        - Pairing page (phone or computer)
+        - SSH settings
+        - More tools
+        - The script over telnet
+        - Translations
+        - Website or docs
+        - Something else
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you send it
+      options:
+        - label: I searched the open issues and discussions and this isn't one of them.
+          required: true

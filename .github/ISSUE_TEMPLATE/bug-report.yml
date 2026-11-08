@@ -1,0 +1,49 @@
+name: Bug report
+description: Something in SSH Doctor doesn't work the way it should
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting it.  The quickest way to fill in the report below: in the TV app, choose **More tools**, then **Report for getting help**, and scan the QR code with your phone.  It has no IP addresses, keys or names in it.
+
+        Locked out right now?  Open SSH Doctor on the TV and choose **Go back to password login**: it works even when SSH doesn't.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did (which button or command), what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: input
+    id: tv
+    attributes:
+      label: TV model and webOS version
+      placeholder: OLED65C2PUA, webOS 25 (10.3.1)
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where
+      options:
+        - The TV app
+        - The pairing page on a phone or computer
+        - ssh-doctor.sh over telnet or SSH
+        - After a restart (the startup hook)
+    validations:
+      required: true
+  - type: textarea
+    id: report
+    attributes:
+      label: The report
+      description: From **More tools > Report for getting help** in the app, or `sh ssh-doctor.sh report` on the TV.  Never paste private keys or passwords.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else
+      description: Error messages, screenshots, or what your computer said when it tried to log in (like `ssh -v root@TV_IP`).

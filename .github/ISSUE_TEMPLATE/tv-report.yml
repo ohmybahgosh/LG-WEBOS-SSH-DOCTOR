@@ -1,0 +1,58 @@
+name: How it went on my TV
+description: Tell us how SSH Doctor worked on your TV, good or bad
+title: "[TV] <TV model>, webOS <version>"
+labels: ["tv-report"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks!  Reports from real TVs show which setups SSH Doctor handles well, including ones where it didn't help.
+  - type: input
+    id: tv
+    attributes:
+      label: TV model
+      placeholder: OLED65C2PUA
+    validations:
+      required: true
+  - type: input
+    id: webos
+    attributes:
+      label: webOS version and firmware
+      placeholder: webOS 25 (10.3.1), firmware 33.31.68
+    validations:
+      required: true
+  - type: input
+    id: rooted
+    attributes:
+      label: How the TV was rooted
+      placeholder: RootMyTV, faultmanager-autoroot, crashd, DejaVuln...
+  - type: checkboxes
+    id: used
+    attributes:
+      label: What you used
+      options:
+        - label: The check (main screen)
+        - label: A repair (Turn SSH on, Fix my keys file, Go back to password login, Undo)
+        - label: Set up a key with the pairing code
+        - label: SSH settings (own password, keys only, port, keepalive)
+        - label: More tools (login history, telnet, host keys, report)
+  - type: dropdown
+    id: result
+    attributes:
+      label: Result
+      options:
+        - It worked, I can log in
+        - It worked, with problems (describe below)
+        - It didn't fix my problem
+    validations:
+      required: true
+  - type: textarea
+    id: report
+    attributes:
+      label: The report
+      description: From **More tools > Report for getting help** in the app, or `sh ssh-doctor.sh report`.  It has no addresses, keys or names in it.
+      render: text
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else

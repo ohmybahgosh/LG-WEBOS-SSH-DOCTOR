@@ -1,4 +1,16 @@
+<div align="center">
+
+<img src="webos-app/src/icon160.png" width="96" alt="">
+
 # LG webOS SSH Doctor: fix SSH on rooted LG TVs
+
+[![CI](https://github.com/ohmybahgosh/LG-WEBOS-SSH-DOCTOR/actions/workflows/ci.yml/badge.svg)](https://github.com/ohmybahgosh/LG-WEBOS-SSH-DOCTOR/actions/workflows/ci.yml)
+[![Release](https://ohmybahgosh.dev/badges/ssh-doctor-release.svg)](https://github.com/ohmybahgosh/LG-WEBOS-SSH-DOCTOR/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Homebrew Channel](https://img.shields.io/badge/Homebrew%20Channel-ohmybahgosh.dev%2Frepo-3ddc97)](https://ohmybahgosh.dev/ssh-doctor/#homebrew)
+[![Project page](https://img.shields.io/badge/ohmybahgosh.dev-project%20page-3ddc97)](https://ohmybahgosh.dev/ssh-doctor/)
+
+</div>
 
 **SSH on your rooted LG TV stopped working?  This app finds out why and fixes it from the TV itself, with just the remote.**  It also sets up an SSH key for your computer or phone with a short pairing code, so nobody has to copy keys around by hand, and lets you set your own root password, move SSH to another port or switch to keys only, all kept after a restart.
 
@@ -120,6 +132,15 @@ node tests/check-sshkey.js .cache/tweetnacl-1.0.3-nacl-fast.min.js   # browser-m
 node tests/check-sha512crypt.js .cache/tweetnacl-1.0.3-nacl-fast.min.js   # password hashes match glibc crypt()
 node tests/ui-check.js           # TV screens and the pairing page in a browser (Playwright)
 ```
+
+## Help and contributing
+
+- **Stuck?**  Ask in [Discussions > Q&A](https://github.com/ohmybahgosh/LG-WEBOS-SSH-DOCTOR/discussions/new?category=q-a).  [SUPPORT.md](.github/SUPPORT.md) lists where everything goes.
+- **Something broken?**  Open a [bug report](https://github.com/ohmybahgosh/LG-WEBOS-SSH-DOCTOR/issues/new?template=bug-report.yml) with the app's **Report for getting help**.
+- **Tried it on your TV?**  A [TV report](https://github.com/ohmybahgosh/LG-WEBOS-SSH-DOCTOR/issues/new?template=tv-report.yml) helps, whether it worked or not.
+- **An idea?**  [Discussions > Ideas](https://github.com/ohmybahgosh/LG-WEBOS-SSH-DOCTOR/discussions/new?category=ideas).
+- **Security problem?**  Report it [privately](https://github.com/ohmybahgosh/LG-WEBOS-SSH-DOCTOR/security/advisories/new).  [SECURITY.md](SECURITY.md) lists everything the app does as root.
+- **Code, docs or a translation?**  See [CONTRIBUTING.md](CONTRIBUTING.md).  AI-assisted pull requests are welcome; coding agents read [AGENTS.md](AGENTS.md).
 
 ## More from OhMyBahGosh
 
