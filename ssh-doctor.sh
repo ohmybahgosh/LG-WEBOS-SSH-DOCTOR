@@ -125,7 +125,7 @@ sessions_on() {
 
 dropbear_version() {
     [ -x "$DROPBEAR" ] || return 0
-    "$DROPBEAR" -V 2>&1 | sed -n 's/.*Dropbear v\{0,1\}\([0-9][0-9.]*\).*/\1/p' | head -n 1
+    "$DROPBEAR" -V 2>&1 | sed -n 's/.*Dropbear v\{0,1\}\([0-9][0-9.]*\).*/\1/p' | awk 'NR == 1'
 }
 
 # root's password: alpine (the Homebrew Channel's placeholder), set, or none
@@ -392,7 +392,8 @@ hbc_masters() { servers_list | awk '$2 == "hbc" { print $1 }'; }
 
 # Who listens on port $1: hbc, another kind, "unknown" (no process found), or nothing
 port_owner() {
-    _o=$(servers_list | awk -v p="$1" '{ for (i = 4; i <= NF; i++) if ($i == p) { print $2; exit } }')
+    # No "exit" in awk: reading to the end keeps the pipe open (see running_flags)
+    _o=$(servers_list | awk -v p="$1" '!f { for (i = 4; i <= NF; i++) if ($i == p) { print $2; f = 1; break } }')
     if [ -n "$_o" ]; then say "$_o"; elif listening "$1"; then say unknown; fi
 }
 
@@ -1047,7 +1048,7 @@ telnet_on() {
 report() {
     collect
     say "LG webOS SSH Doctor $VERSION report"
-    say "webOS: $(sed -n 's/.*"core_os_release" *: *"\([^"]*\)".*/\1/p' "$R/var/run/nyx/os_info.json" 2>/dev/null | head -n 1)"
+    say "webOS: $(sed -n 's/.*"core_os_release" *: *"\([^"]*\)".*/\1/p' "$R/var/run/nyx/os_info.json" 2>/dev/null | awk 'NR == 1')"
     say "Kernel: $(uname -r 2>/dev/null)"
     say "Homebrew Channel: $([ -d "$HBC_SVC" ] && echo installed || echo missing), SSH switch $_flag, telnet $_tel, failsafe $([ -f "$FAILSAFE" ] && echo yes || echo no)"
     say "dropbear: $(dropbear_version), running $_run, port $_port$([ -n "$_trial" ] && printf ' (+%s)' "$_trial"), owner ${_owner:-nobody}"
