@@ -8,7 +8,8 @@
 # and root's password through the same bind-mounted /etc/shadow the Homebrew
 # Channel uses at boot.  Settings live in /var/lib/webosbrew/ssh-doctor and a
 # startup hook in /var/lib/webosbrew/init.d puts them back after a restart.
-# Every file it changes is backed up first.
+# Every file it changes is backed up first.  Entware's OpenSSH and dropbear
+# are checked (sshd -T only reads), never changed, started or stopped.
 #
 # Usage: sh ssh-doctor.sh COMMAND [ARGS]
 #   status [--json]   what decides whether SSH login works, and what's wrong
@@ -22,6 +23,7 @@
 #   key-remove FP | key-rename FP NAME
 #                     take one key out, or change its name (by fingerprint)
 #   servers [--json]  every SSH server running on the TV, and its ports
+#   entware [--json]  Entware's OpenSSH and dropbear: checked, never changed
 #   settings [--json] the SSH settings this script manages
 #   set-password HASH root's own password, as a SHA-512 crypt hash ($6$...)
 #   clear-password    back to the Homebrew Channel's password handling
@@ -71,6 +73,23 @@ SDDIR="$R/var/lib/webosbrew/ssh-doctor"
 CONF="$SDDIR/settings"
 PWHASH="$SDDIR/root.hash"
 HOOK="$R/var/lib/webosbrew/init.d/60-ssh-doctor"
+# Developer Mode's SSH: its own server, user prisoner, port 9922
+DEVMODE_PORT=9922
+# Entware's own SSH servers: checked, never changed or restarted.  Entware's
+# programs read /opt/etc for their settings and its passwd and shadow, so its
+# root password isn't the one in /etc/shadow.
+OPT="$R/opt"
+ENT_SSHD="$OPT/sbin/sshd"
+ENT_SSHD_CONF="$OPT/etc/ssh/sshd_config"
+ENT_SSH_DIR="$OPT/etc/ssh"
+ENT_DROPBEAR="$OPT/sbin/dropbear"
+ENT_DB_DIR="$OPT/etc/dropbear"
+ENT_INITD="$OPT/etc/init.d"
+ENT_SHADOW="$OPT/etc/shadow"
+# Where Entware gets started at boot (rc.unslung, from an init.d script or
+# the Homebrew Channel's startup.sh)
+INITD="$R/var/lib/webosbrew/init.d"
+STARTUP="$R/var/lib/webosbrew/startup.sh"
 # webOS's system log, where dropbear writes logins and failed tries
 LOGDIR="${SD_LOGDIR:-$R/tmp/var/log}"
 # Seconds between keepalives when that setting is on
@@ -362,7 +381,7 @@ server_kind() {
         "$DROPBEAR"*|*/org.webosbrew.hbchannel.service/bin/dropbear*) say hbc; return ;;
         /opt/*) if [ "$2" = sshd ]; then say entware-openssh; else say entware-dropbear; fi; return ;;
     esac
-    case " $3 " in *" 9922 "*) say devmode; return ;; esac
+    case " $3 " in *" $DEVMODE_PORT "*) say devmode; return ;; esac
     case "$_cl" in *devmode*|*developer*) [ "$2" = sshd ] && { say devmode; return; } ;; esac
     say other
 }
@@ -542,13 +561,160 @@ settings_json() {
         "$(settings_applied && echo true || echo false)" "$(js "$(running_flags)")"
 }
 
+# ------------------------------------------------------------------ Entware
+#
+# Entware's OpenSSH and dropbear, for people who use them instead of (or as
+# well as) the Homebrew Channel's.  Read only: nothing here changes, starts
+# or stops them.  OpenSSH is asked for its settings with "sshd -T", which
+# only reads its files.
+
+# The Entware SSH servers that are installed
+ent_kinds() {
+    if [ -x "$ENT_SSHD" ]; then say entware-openssh; fi
+    if [ -x "$ENT_DROPBEAR" ]; then say entware-dropbear; fi
+    return 0
+}
+
+# Entware's start script for KIND (S40sshd, S51dropbear and so on), if any
+ent_initscript() {
+    case "$1" in entware-openssh) _ip='sshd' ;; *) _ip='dropbear' ;; esac
+    for _f in "$ENT_INITD"/S[0-9]*"$_ip"; do
+        if [ -f "$_f" ]; then say "$_f"; return 0; fi
+    done
+    return 0
+}
+
+# The port a running Entware SSH server listens on, if any
+entware_port() { servers_list | awk '$2 ~ /^entware-/ && NF >= 4 { print $4 }' | awk 'NR == 1'; }
+
+# Does anything start Entware at boot?
+ent_autostart() { grep -q -s 'rc\.unslung' "$INITD"/* "$STARTUP" 2>/dev/null; }
+
+# OpenSSH's own settings (sshd -T), one value: sshd_get KEY.  Asked once per
+# run; empty when sshd refuses its settings (sshd_err says why)
+sshd_load() {
+    [ -f "$RUN/sshdT.$$" ] && return 0
+    if "$ENT_SSHD" -T -f "$ENT_SSHD_CONF" > "$RUN/sshdT.$$.tmp" 2> "$RUN/sshdE.$$" < /dev/null; then :; else : > "$RUN/sshdT.$$.tmp"; fi
+    mv "$RUN/sshdT.$$.tmp" "$RUN/sshdT.$$"
+}
+sshd_get() {
+    sshd_load
+    awk -v k="$1" '$1 == k { $1 = ""; sub(/^ +/, ""); print }' "$RUN/sshdT.$$" | awk 'NR == 1'
+}
+sshd_err() { sshd_load; grep -v '^[[:space:]]*$' "$RUN/sshdE.$$" 2>/dev/null | awk 'NR == 1'; }
+
+# The port Entware's dropbear is set to start on: -p in its start script
+edb_port() {
+    _ei=$(ent_initscript entware-dropbear)
+    _p=''
+    [ -n "$_ei" ] && _p=$(sed -n 's/.*-p[[:space:]]*\([0-9.]*:\)\{0,1\}\([0-9][0-9]*\).*/\2/p' "$_ei" | awk 'NR == 1')
+    say "${_p:-22}"
+}
+
+# root's password for Entware's programs, from /opt/etc/shadow: set or none
+ent_password_state() {
+    _h=$(awk -F: '$1 == "root" { print $2 }' "$ENT_SHADOW" 2>/dev/null | awk 'NR == 1')
+    case "$_h" in
+        ''|'*'|'!'|'!!'|x|'*'*|'!'*) say none ;;
+        *) say set ;;
+    esac
+}
+
+# Check one Entware server.  Sets:
+#   _ek_run    yes or no
+#   _ek_ports  the ports it listens on
+#   _ek_port   the port it's set to use
+#   _ek_codes  what's wrong, space-separated
+#   _ek_pwoff  yes when it won't take root's password
+#   _ek_detail OpenSSH's own error, when it refuses its settings
+ent_check() {
+    _ek=$1; _ek_codes=''; _ek_detail=''; _ek_pwoff=no
+    _ek_ports=$(servers_list | awk -v k="$_ek" '$2 == k { for (i = 4; i <= NF; i++) printf "%s ", $i }' | sed 's/ *$//')
+    _ek_run=no
+    [ -n "$(servers_list | awk -v k="$_ek" '$2 == k { print $1 }')" ] && _ek_run=yes
+    _ek_init=$(ent_initscript "$_ek")
+    _ek_hk=no
+    if [ "$_ek" = entware-openssh ]; then
+        for _h in "$ENT_SSH_DIR"/ssh_host_*_key; do
+            if [ -e "$_h" ] && [ ! -s "$_h" ]; then _ek_hk=yes; fi
+        done
+        sshd_load
+        if [ ! -s "$RUN/sshdT.$$" ]; then
+            _ek_detail=$(sshd_err)
+            case "$_ek_detail" in
+                *[Hh]ost[Kk]ey*|*[Hh]ost\ [Kk]ey*) _ek_hk=yes ;;
+                *) _ek_codes="$_ek_codes sshd-config-bad" ;;
+            esac
+        else
+            case "$(sshd_get permitrootlogin)" in
+                no|forced-commands-only) _ek_codes="$_ek_codes sshd-root-denied" ;;
+                prohibit-password|without-password) _ek_pwoff=yes ;;
+            esac
+            [ "$(sshd_get passwordauthentication)" = no ] && _ek_pwoff=yes
+            case " $(sshd_get authorizedkeysfile) " in
+                *" .ssh/authorized_keys "*|*" %h/.ssh/authorized_keys "*|*" /home/root/.ssh/authorized_keys "*) ;;
+                *) _ek_codes="$_ek_codes sshd-keyfile-elsewhere" ;;
+            esac
+        fi
+        [ $_ek_hk = yes ] && _ek_codes="$_ek_codes sshd-hostkey-broken"
+        _ek_port=$(sshd_get port)
+        _ek_port=${_ek_port:-22}
+    else
+        for _h in "$ENT_DB_DIR"/dropbear_*_host_key; do
+            if [ -e "$_h" ] && [ ! -s "$_h" ]; then _ek_hk=yes; fi
+        done
+        [ $_ek_hk = yes ] && _ek_codes="$_ek_codes edb-hostkey-broken"
+        _ek_port=$(edb_port)
+    fi
+    if [ -n "$_ek_init" ]; then
+        if [ $_ek_run = no ]; then
+            if [ -n "$(port_owner "$_ek_port")" ]; then _ek_codes="$_ek_codes entware-port-clash"
+            else _ek_codes="$_ek_codes entware-stopped"; fi
+        fi
+        ent_autostart || _ek_codes="$_ek_codes entware-no-autostart"
+    fi
+    _ek_codes=${_ek_codes# }
+}
+
+# [{"kind":..,"running":..,"ports":[..],"port":..,"startScript":..,
+#   "problems":[..],"detail":..}] for each installed Entware SSH server
+ent_json() {
+    printf '['; _f=1
+    for _k in $(ent_kinds); do
+        ent_check "$_k"
+        [ $_f = 1 ] || printf ','; _f=0
+        printf '{"kind":%s,"running":%s,"ports":[%s],"port":%s,"startScript":%s,"passwordOff":%s,"problems":[%s],"detail":%s}' \
+            "$(js "$_k")" "$([ $_ek_run = yes ] && echo true || echo false)" \
+            "$(printf '%s' "$_ek_ports" | tr ' ' ',')" "$_ek_port" \
+            "$([ -n "$_ek_init" ] && echo true || echo false)" "$([ $_ek_pwoff = yes ] && echo true || echo false)" \
+            "$(for _c in $_ek_codes; do printf '"%s",' "$_c"; done | sed 's/,$//')" "$(js "$_ek_detail")"
+    done
+    printf ']'
+}
+
+ent_text() {
+    for _k in $(ent_kinds); do
+        ent_check "$_k"
+        say "$_k: installed, running $_ek_run, port $_ek_port${_ek_ports:+ (listening on $_ek_ports)}, start script $([ -n "$_ek_init" ] && echo yes || echo no)"
+        [ -n "$_ek_codes" ] && say "  found: $_ek_codes"
+        [ -n "$_ek_detail" ] && say "  sshd says: $_ek_detail"
+    done
+    return 0
+}
+
 # ------------------------------------------------------------------ status
 
 # Each finding is "code level" (level: problem, tip); the app words them
 collect() {
     FIND=''
-    add() { FIND="$FIND$1 $2
-"; }
+    # Each code once
+    add() {
+        case "
+$FIND" in *"
+$1 "*) return 0 ;; esac
+        FIND="$FIND$1 $2
+"
+    }
     _port=$(ssh_port)
     _trial=$(trial_port)
     _flag=no; [ -f "$SSHD_FLAG" ] && _flag=yes
@@ -565,20 +731,63 @@ collect() {
     _others=$(servers_list | awk '$2 != "hbc"' | wc -l | tr -d ' ')
     _badpw=$(bad_logins_recent)
 
+    # Entware's SSH servers.  When the Homebrew Channel's isn't answering
+    # and one of Entware's is, that's how people get in: its problems count,
+    # and the Homebrew Channel's SSH being off isn't one.
+    _entrun=''; _entc=''; _entpwoff=no
+    for _k in $(ent_kinds); do
+        ent_check "$_k"
+        if [ $_ek_run = yes ]; then
+            _entrun="$_entrun $_k"
+            [ $_ek_pwoff = yes ] && _entpwoff=yes
+        fi
+        _entc="$_entc $_ek_codes"
+    done
+    _entrun=${_entrun# }
+    _active=''
+    if [ "$_listen" = yes ]; then _active=hbc
+    elif [ -n "$_entrun" ]; then _active=${_entrun%% *}
+    fi
+    # Can root log in on Entware's SSH?  Keys are the same file; the password
+    # is Entware's own, and OpenSSH may not take one for root at all
+    _entpw=$(ent_password_state)
+    _entlogin=no
+    if [ "$_kc" != 0 ]; then _entlogin=yes
+    elif [ "$_entpw" = set ] && [ $_entpwoff = no ]; then _entlogin=yes
+    fi
+
     [ -d "$HBC_SVC" ] || add hbc-missing problem
     [ -f "$FAILSAFE" ] && add failsafe problem
-    if [ -n "$_owner" ] && [ "$_owner" != hbc ]; then add port-taken problem
-    elif [ "$_flag" = no ] && [ "$_listen" = no ]; then add ssh-off problem
+    if [ -n "$_owner" ] && [ "$_owner" != hbc ]; then
+        # Entware's SSH on the port, with the Homebrew Channel's turned off:
+        # that's a choice, not a problem
+        case "$_owner" in
+            entware-*) [ "$_flag" = yes ] && add port-taken problem ;;
+            *) add port-taken problem ;;
+        esac
+    elif [ "$_flag" = no ] && [ "$_listen" = no ]; then
+        [ -n "$_entrun" ] || add ssh-off problem
     elif [ "$_flag" = yes ] && [ "$_listen" = no ]; then add ssh-not-running problem
     elif [ "$_flag" = no ] && [ "$_listen" = yes ]; then add ssh-off-next-boot tip
     fi
+    case "$_active" in entware-*) add ssh-is-entware tip ;; esac
     # Locked out: keys only, and none of them usable
     if [ "$_kc" = 0 ]; then
-        if [ "$_ko" = yes ]; then add keys-only-no-keys problem
+        if [ "$_active" != "${_active#entware-}" ]; then
+            [ $_entlogin = yes ] || add entware-no-way-in problem
+        elif [ "$_ko" = yes ]; then add keys-only-no-keys problem
         elif [ "$_pw" != alpine ] && [ "$_pw" != set ]; then
             if [ -f "$AK" ]; then add no-way-in problem; else add no-password problem; fi
         fi
     fi
+    # What's wrong with Entware's servers: a problem when nothing else lets
+    # people in, otherwise a tip
+    for _c in $_entc; do
+        case "$_c" in
+            entware-no-autostart|sshd-keyfile-elsewhere) add "$_c" tip ;;
+            *) if [ "$_listen" = yes ]; then add "$_c" tip; else add "$_c" problem; fi ;;
+        esac
+    done
     case " $_kp " in *" private "*) add keys-private problem ;; esac
     case " $_kp " in *" crlf "*|*" bom "*|*" wrapped "*|*" putty "*) add keys-fixable problem ;; esac
     case " $_kp " in *" bad "*|*" broken "*) add keys-bad problem ;; esac
@@ -586,9 +795,12 @@ collect() {
     hostkeys_broken && add hostkey-broken problem
     if [ "$_listen" = yes ] && ! settings_applied; then add settings-not-applied problem; fi
     [ -n "$_trial" ] && add port-trial tip
-    [ "$_pw" = alpine ] && [ "$_ko" = no ] && add password-default tip
+    # alpine is the Homebrew Channel's: Entware's SSH has its own password
+    if [ "$_pw" = alpine ] && [ "$_ko" = no ] && [ "$_active" = "${_active#entware-}" ]; then
+        add password-default tip
+    fi
     [ "${_badpw:-0}" -ge 5 ] 2>/dev/null && add failed-logins tip
-    [ "$_others" != 0 ] && add other-ssh tip
+    case "$_active" in entware-*) ;; *) [ "$_others" != 0 ] && add other-ssh tip ;; esac
     [ "$_tel" = no ] && add telnet-off tip
 }
 
@@ -619,6 +831,8 @@ status_json() {
     printf '"port":%s,"portOwner":%s,"keysOnly":%s,"sftp":%s,"failedLogins":%s,' "$_port" "$(js "$_owner")" \
         "$([ "$_ko" = yes ] && echo true || echo false)" "$([ -x "$SFTP_SERVER" ] && echo true || echo false)" "${_badpw:-0}"
     printf '"settings":%s,"servers":%s,' "$(settings_json)" "$(servers_json)"
+    printf '"active":%s,"entware":%s,"entwarePassword":%s,"entwareLogin":%s,' "$(js "$_active")" "$(ent_json)" \
+        "$(js "$_entpw")" "$([ $_entlogin = yes ] && echo true || echo false)"
     printf '"sessions":{"%s":%s%s},' "$_port" "$(sessions_on "$_port")" "$([ -n "$_trial" ] && printf ',"%s":%s' "$_trial" "$(sessions_on "$_trial")")"
     printf '"legacyRsa":%s,' "$(legacy_rsa "$_ver" && echo true || echo false)"
     printf '"ips":['
@@ -657,6 +871,8 @@ status_text() {
     say "SSH server running: $_run, listening on port $_port: $_listen${_trial:+ (and $_trial until you keep the new port)}"
     say "Settings: $(dropbear_flags)$([ -f "$PWHASH" ] && printf ', your own password')"
     servers_list | while read -r _p _k _c _ps; do say "SSH server: $_c ($_k), pid $_p, port ${_ps:-none}"; done
+    ent_text | sed 's/^/Entware /'
+    case "$_active" in entware-*) say "Logging in goes through $_active.  Root's password there is Entware's own: $_entpw" ;; esac
     say "Password login: $_pw"
     say "Usable keys in $AK: ${_kc:-0}${_kp:+ (found: $_kp)}"
     [ -n "$_pp" ] && say "Permissions to fix: $_pp"
@@ -1059,6 +1275,9 @@ report() {
     say "Host keys: $(for _h in "$HOSTKEYS"/dropbear_*_host_key; do [ -e "$_h" ] && printf '%s(%s) ' "$(basename "$_h" | sed 's/dropbear_//; s/_host_key//')" "$(wc -c < "$_h" | tr -d ' ')"; done)"
     say "sftp-server: $([ -x "$SFTP_SERVER" ] && echo yes || echo no), node: $([ -n "$(find_node)" ] && echo yes || echo no)"
     servers_list | while read -r _p _k _c _ps; do say "Server: $_c $_k ports ${_ps:-none}"; done
+    # sshd's own error can name an address: leave those out
+    ent_text | sed -E 's/([0-9]{1,3}\.){3}[0-9]{1,3}/(address)/g; s/^/Entware /'
+    say "In use: ${_active:-none}, Entware password $_entpw"
     say "Findings: $(printf '%s' "$FIND" | awk '{ printf "%s ", $1 }')"
     say "Logins in the log: $(logins | tail -n 1 | sed 's/ since .*//')"
 }
@@ -1094,9 +1313,15 @@ pair_start() {
     : > "$PAIR/alive"
     # What the page shows once paired: how to log in, and the TV's host keys
     # for known_hosts
-    printf '{"purpose":%s,"port":%s,"legacyRsa":%s,"hostKeys":%s}\n' "$(js "$_purpose")" "$(ssh_port)" \
-        "$(legacy_rsa "$(dropbear_version)" && echo true || echo false)" \
-        "$("$_n" "$HERE/keyinfo.js" hostpub "$HOSTKEYS" --json 2>/dev/null || echo '[]')" > "$PAIR/info.json"
+    # With Entware's SSH answering instead, its port, and no host keys or old
+    # dropbear options: those are the Homebrew Channel's
+    if [ "$(port_owner "$(ssh_port)")" != hbc ] && [ -n "$(entware_port)" ]; then
+        printf '{"purpose":%s,"port":%s,"legacyRsa":false,"hostKeys":[]}\n' "$(js "$_purpose")" "$(entware_port)" > "$PAIR/info.json"
+    else
+        printf '{"purpose":%s,"port":%s,"legacyRsa":%s,"hostKeys":%s}\n' "$(js "$_purpose")" "$(ssh_port)" \
+            "$(legacy_rsa "$(dropbear_version)" && echo true || echo false)" \
+            "$("$_n" "$HERE/keyinfo.js" hostpub "$HOSTKEYS" --json 2>/dev/null || echo '[]')" > "$PAIR/info.json"
+    fi
     if command -v setsid >/dev/null 2>&1; then
         setsid "$_n" "$HERE/pair-server.js" "$PAIR" "$PAIR_PORT" "$(ips)" < /dev/null > "$PAIR/log" 2>&1 &
     else
@@ -1173,6 +1398,7 @@ case "$CMD" in
     key-remove) key_edit remove "${1:-}" ;;
     key-rename) key_edit rename "${1:-}" "${2:-}" ;;
     servers) if [ "${1:-}" = --json ]; then servers_json; echo; else servers_list; fi ;;
+    entware) if [ "${1:-}" = --json ]; then ent_json; echo; else ent_text; fi ;;
     settings) if [ "${1:-}" = --json ]; then settings_json; echo; else say "$(dropbear_flags)"; fi ;;
     set-password) set_password "${1:-}" ;;
     clear-password) clear_password ;;
@@ -1191,6 +1417,6 @@ case "$CMD" in
     telnet-on) telnet_on ;;
     report) report ;;
     version) say "$VERSION" ;;
-    -h|--help|help) sed -n '2,39s/^# \{0,1\}//p' "$0" ;;
+    -h|--help|help) sed -n '2,41s/^# \{0,1\}//p' "$0" ;;
     *) die "Unknown command: $CMD (try: sh $0 help)" ;;
 esac

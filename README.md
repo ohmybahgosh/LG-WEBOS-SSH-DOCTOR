@@ -45,6 +45,13 @@ These are the common ways SSH breaks on a rooted LG TV, and none of them needs a
 - the TV's IP address, the exact command to log in with, and the TV's SSH key fingerprint, so a "host identification has changed" warning can be checked instead of guessed at
 - whether the TV's own SSH keys are broken (an empty key file stops dropbear from starting), and recent failed logins
 
+**Use Entware's SSH instead?**  When the Homebrew Channel's SSH is off and Entware's OpenSSH or dropbear answers, SSH Doctor treats that as your SSH, not as a problem, and checks it too, without changing it:
+
+- whether OpenSSH accepts its settings (`sshd -T`), and what it says is wrong when it doesn't
+- whether root can log in at all (`PermitRootLogin`), and whether it takes a password: OpenSSH turns root's password off by default, and Entware's programs use their own password file, `/opt/etc/shadow`, not the `alpine` one
+- whether it reads the same keys file, so **Set up a key** works for it (the pairing page then gives Entware's port)
+- missing or empty host keys, a server that's installed but not running, one set to a port another server already has, and Entware not being started at boot
+
 ![The check, on a TV whose keys file needs fixing](assets/screenshots/tv-messy.png)
 
 **Repair, one button each.**  Each says what it will change, keeps a dated backup, and can be undone with **Undo a change**:
@@ -106,6 +113,7 @@ sh ssh-doctor.sh add-key FILE  # add one public key
 sh ssh-doctor.sh keys          # the keys that can log in, with fingerprints
 sh ssh-doctor.sh restore NAME  # put a backup back (see: sh ssh-doctor.sh backups)
 sh ssh-doctor.sh servers       # every SSH server on the TV, and its ports
+sh ssh-doctor.sh entware       # Entware's OpenSSH and dropbear, checked
 sh ssh-doctor.sh set-port 2222 # move SSH; then: port-keep, or port-revert
 sh ssh-doctor.sh set-keys-only on        # or off; also: set-keepalive on|off
 sh ssh-doctor.sh set-password '$6$...'   # a hash, e.g. from: openssl passwd -6

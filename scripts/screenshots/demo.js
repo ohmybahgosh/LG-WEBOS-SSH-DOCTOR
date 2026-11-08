@@ -1,6 +1,6 @@
 // Made-up answers from ssh-doctor.sh, so the TV app can run in a desktop
 // browser: load it before app.js.  Pick a TV with ?s=healthy, alpine, locked,
-// off, messy or custom (its own settings, a port change underway).  ?pair=password
+// off, messy, entware or custom (its own settings, a port change underway).  ?pair=password
 // plays the pairing screen for a password.  The pairing screen plays out by itself: a phone connects,
 // then sends a key.
 (function () {
@@ -35,7 +35,15 @@
             servers: [{ pid: 5550, kind: 'hbc', name: 'dropbear', ports: [22, 2222], cmd: '/media/developer/apps/usr/palm/services/org.webosbrew.hbchannel.service/bin/dropbear -R -p 2222 -p 22 -K 30' },
                 { pid: 7001, kind: 'entware-openssh', name: 'sshd', ports: [2200], cmd: '/opt/sbin/sshd' }],
             sessions: { '2222': 1, '22': 0 },
-            findings: [f('port-trial', 'tip'), f('failed-logins', 'tip'), f('other-ssh', 'tip')] }
+            findings: [f('port-trial', 'tip'), f('failed-logins', 'tip'), f('other-ssh', 'tip')] },
+        // The Homebrew Channel's SSH off, Entware's OpenSSH on 22, Entware's dropbear installed but stopped
+        entware: { sshEnabled: false, running: false, listening: false, portOwner: 'entware-openssh', active: 'entware-openssh',
+            entwarePassword: 'none', entwareLogin: true,
+            servers: [{ pid: 7001, kind: 'entware-openssh', name: 'sshd', ports: [22], cmd: '/opt/sbin/sshd' },
+                { pid: 7300, kind: 'devmode', name: 'sshd', ports: [9922], cmd: '/usr/sbin/sshd -f /etc/devmode/sshd_config' }],
+            entware: [{ kind: 'entware-openssh', running: true, ports: [22], port: 22, startScript: true, passwordOff: true, problems: ['sshd-keyfile-elsewhere'], detail: '' },
+                { kind: 'entware-dropbear', running: false, ports: [], port: 22, startScript: true, passwordOff: false, problems: ['entware-port-clash'], detail: '' }],
+            findings: [f('entware-port-clash'), f('ssh-is-entware', 'tip'), f('sshd-keyfile-elsewhere', 'tip')] }
     };
     var st = {};
     for (var k in base) { st[k] = base[k]; }

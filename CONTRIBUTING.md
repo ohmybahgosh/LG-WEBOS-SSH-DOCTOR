@@ -27,7 +27,7 @@ The tests run the script against a fake TV in a temporary folder (its own `/proc
 Ground rules:
 
 - **It runs as root on someone's TV, often when they're already locked out.**  Never leave someone with no way in: keep a backup of anything you change, keep **Go back to password login** working, and keep telnet as a way back unless the person turns it off.
-- **Only the Homebrew Channel's SSH.**  Detect other SSH servers, never change them.  Never write to system partitions: root's password goes through a bind-mounted copy of `/etc/shadow`, the way the Homebrew Channel does it.
+- **Only the Homebrew Channel's SSH.**  Detect and check other SSH servers (read-only, like `sshd -T`), never change, start or stop them.  Never write to system partitions: root's password goes through a bind-mounted copy of `/etc/shadow`, the way the Homebrew Channel does it.
 - **Passwords never travel or rest in the clear.**  The app and the pairing page turn a password into a SHA-512 crypt hash before it leaves them, and only the hash is stored.
 - **POSIX `sh` for busybox, ES5 for the app.**  No bashisms; ShellCheck must pass.
 - **A test for every change in behavior,** in `tests/run.sh` (or `tests/ui-check.js` for screens).

@@ -2,6 +2,15 @@
 
 All notable changes to LG webOS SSH Doctor.  Versions follow [semantic versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Entware's SSH counts as SSH.**  When the Homebrew Channel's SSH is off and Entware's OpenSSH or dropbear answers, the app says so and no longer calls the Homebrew Channel's SSH being off, or Entware's server on port 22, a problem.  The main screen, **How to log in** and the pairing page use Entware's port.
+- **Checks for Entware's OpenSSH and dropbear,** read only: settings OpenSSH refuses (with its own error), `PermitRootLogin`, root's password being off in OpenSSH or missing from Entware's own `/opt/etc/shadow`, keys read from another file, missing or empty host keys, a server that's installed but stopped or set to a port that's taken, and Entware not starting at boot.  They're problems when Entware's server is the way in, tips when the Homebrew Channel's works.
+- **SSH servers on this TV** also lists Entware servers that are installed but not running, what OpenSSH says is wrong, and how Developer Mode's SSH works (user `prisoner`, port 9922).
+- `sh ssh-doctor.sh entware [--json]`, and the report covers Entware's servers (addresses left out).
+
 ## [0.2.0] - 2026-11-08
 
 ### Added

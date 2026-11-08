@@ -1,0 +1,26 @@
+#!/bin/sh
+# Stands in for Entware's OpenSSH in the tests.  "sshd -T -f FILE" prints the
+# settings the way the real one does: lowercase names, the file's first value
+# for each, then the defaults for the rest.  A line starting BROKEN in the
+# file is refused like a bad option, and FAKE_SSHD_NOKEYS=1 acts out missing
+# host keys.  It never runs as a server: the tests use fake_proc for that.
+conf=''
+prev=''
+for a in "$@"; do
+    [ "$prev" = -f ] && conf=$a
+    prev=$a
+done
+case " $* " in *" -T "*|*" -t "*) ;; *) exit 0 ;; esac
+if [ -n "${FAKE_SSHD_NOKEYS:-}" ]; then
+    echo "sshd: no hostkeys available -- exiting." >&2
+    exit 1
+fi
+if grep -q '^BROKEN' "$conf" 2>/dev/null; then
+    echo "$conf line $(grep -n '^BROKEN' "$conf" | cut -d: -f1 | awk 'NR == 1'): Bad configuration option: BROKEN" >&2
+    exit 255
+fi
+{
+    grep -v '^[[:space:]]*#' "$conf" 2>/dev/null
+    printf '%s\n' 'Port 22' 'PermitRootLogin prohibit-password' 'PasswordAuthentication yes' \
+        'AuthorizedKeysFile .ssh/authorized_keys .ssh/authorized_keys2' 'StrictModes yes'
+} | awk 'NF { k = tolower($1); if (k in seen) next; seen[k] = 1; $1 = k; print }'

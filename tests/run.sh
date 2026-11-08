@@ -550,7 +550,138 @@ test_report() {
     check "no key fingerprints" lacks "SHA256:"
 }
 
-for c in healthy ssh_off_then_on flag_but_not_running running_but_off_next_boot locked_out_then_password \
+# ---------------------------------------------------------------- Entware
+
+OPTD() { printf '%s' "$SD_ROOT/opt"; }
+# Entware's OpenSSH installed, with its start script; "auto" also starts
+# Entware at boot the way the Entware installer does
+entware_sshd() {
+    mkdir -p "$(OPTD)/sbin" "$(OPTD)/etc/ssh" "$(OPTD)/etc/init.d"
+    cp "$HERE/fakebin/sshd" "$(OPTD)/sbin/sshd"; chmod 755 "$(OPTD)/sbin/sshd"
+    printf '#!/bin/sh\n' > "$(OPTD)/etc/init.d/S40sshd"; chmod 755 "$(OPTD)/etc/init.d/S40sshd"
+    : > "$(OPTD)/etc/ssh/sshd_config"
+    printf 'x' > "$(OPTD)/etc/ssh/ssh_host_ed25519_key"
+    if [ "${1:-}" = auto ]; then
+        mkdir -p "$SD_ROOT/var/lib/webosbrew/init.d"
+        printf '#!/bin/sh\n/opt/etc/init.d/rc.unslung start\n' > "$SD_ROOT/var/lib/webosbrew/init.d/S99entware"
+    fi
+}
+# ...and running, listening on PORT
+entware_sshd_up() { fake_proc sshd "/opt/sbin/sshd" 1 "${1:-22}" > /dev/null; }
+ent_root_password() { mkdir -p "$(OPTD)/etc"; printf 'root:%s:15069:0:99999:7:::\n' "$1" > "$(OPTD)/etc/shadow"; }
+levels() { python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(' '.join(sorted(set(f['level'] for f in d['findings']))))" "$T/s.json"; }
+level_of() { python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print([f['level'] for f in d['findings'] if f['code']==sys.argv[2]][0])" "$T/s.json" "$1"; }
+ent() { python3 -c "import json,sys; d=json.load(open(sys.argv[1])); e=[x for x in d['entware'] if x['kind']==sys.argv[2]][0]; print(json.dumps(e[sys.argv[3]]))" "$T/s.json" "$1" "$2"; }
+
+test_entware_openssh_in_use() {
+    # The Homebrew Channel's SSH is off; Entware's OpenSSH answers on 2200
+    entware_sshd auto; entware_sshd_up 2200
+    cat "$T/k_ed.pub" > "$(AK)"; chmod 600 "$(AK)"
+    json
+    check "no ssh-off" nofinding ssh-off
+    check "port 22 isn't 'taken'" nofinding port-taken
+    check "says Entware's is in use" finding ssh-is-entware
+    check "no other-ssh as well" nofinding other-ssh
+    check "only tips" is "$(levels)" tip
+    check "active" is "$(field active)" '"entware-openssh"'
+    check "can log in" is "$(field entwareLogin)" true
+    check "running, on 2200" is "$(ent entware-openssh ports)" '[2200]'
+    run status
+    check "text names it" has "Logging in goes through entware-openssh"
+    run entware --json
+    check "entware command" has '"kind":"entware-openssh"'
+    run pair-start
+    check "pairing page uses Entware's port" grep -q '"port":2200,"legacyRsa":false,"hostKeys":\[\]' "$SD_ROOT/tmp/ssh-doctor/pair/info.json"
+    # Both: Entware's on 22 too, so the Homebrew Channel's can't be turned on there
+    entware_sshd_up 22
+    json
+    check "still not a problem while the Homebrew Channel's is off" nofinding port-taken
+}
+
+test_entware_openssh_root_password() {
+    entware_sshd auto; entware_sshd_up 22; rm -f "$(AK)"
+    # alpine is in /etc/shadow, but Entware's programs read /opt/etc/shadow
+    alpine
+    json
+    check "no Entware password: locked out" finding entware-no-way-in
+    check "not the Homebrew Channel's lockout" nofinding no-password
+    check "no alpine tip (not used here)" nofinding password-default
+    ent_root_password "$HASH"
+    json
+    check "OpenSSH turns root's password off by default" finding entware-no-way-in
+    check "passwordOff" is "$(ent entware-openssh passwordOff)" true
+    echo 'PermitRootLogin yes' > "$(OPTD)/etc/ssh/sshd_config"
+    json
+    check "PermitRootLogin yes and a password: fine" nofinding entware-no-way-in
+    echo 'PermitRootLogin no' > "$(OPTD)/etc/ssh/sshd_config"
+    json
+    check "root not allowed at all" finding sshd-root-denied
+    check "a problem, since it's the way in" is "$(level_of sshd-root-denied)" problem
+}
+
+test_entware_openssh_broken() {
+    flag_on; sshd_up; cat "$T/k_ed.pub" > "$(AK)"; chmod 600 "$(AK)"
+    entware_sshd auto
+    printf 'Port 2222\nBROKEN yes\n' > "$(OPTD)/etc/ssh/sshd_config"
+    json
+    check "config refused" finding sshd-config-bad
+    check "a tip while the Homebrew Channel's works" is "$(level_of sshd-config-bad)" tip
+    check "sshd's words kept" sh -c "python3 -c \"import json,sys; d=json.load(open('$T/s.json')); assert 'Bad configuration option' in d['entware'][0]['detail']\""
+    check "Homebrew Channel still the way in" is "$(field active)" '"hbc"'
+    printf 'Port 2222\nAuthorizedKeysFile /opt/etc/keys/%%u\n' > "$(OPTD)/etc/ssh/sshd_config"
+    : > "$(OPTD)/etc/ssh/ssh_host_ed25519_key"
+    json
+    check "keys read from elsewhere" finding sshd-keyfile-elsewhere
+    check "empty host key" finding sshd-hostkey-broken
+    check "stopped, port free" finding entware-stopped
+    printf 'x' > "$(OPTD)/etc/ssh/ssh_host_ed25519_key"
+    export FAKE_SSHD_NOKEYS=1
+    json
+    unset FAKE_SSHD_NOKEYS
+    check "no host keys counts as a host key problem" finding sshd-hostkey-broken
+    check "not as a settings problem" nofinding sshd-config-bad
+    # Nothing answers now: Entware's problems are problems
+    for p in $(fake_pids); do fake_kill "$p"; done
+    rm -f "$SD_ROOT/var/luna/preferences/webosbrew_sshd_enabled"
+    json
+    check "a problem with nothing else running" is "$(level_of entware-stopped)" problem
+}
+
+test_entware_port_clash() {
+    flag_on; sshd_up; cat "$T/k_ed.pub" > "$(AK)"; chmod 600 "$(AK)"
+    entware_sshd
+    json
+    check "can't start on the Homebrew Channel's port" finding entware-port-clash
+    check "not called stopped" nofinding entware-stopped
+    check "no autostart noticed" finding entware-no-autostart
+    check "SSH itself is fine" is "$(levels)" tip
+    # Both turned on, Entware's won the port: the Homebrew Channel's can't start
+    for p in $(fake_pids); do fake_kill "$p"; done
+    entware_sshd_up 22
+    json
+    check "port taken, since the Homebrew Channel's is turned on" finding port-taken
+}
+
+test_entware_dropbear() {
+    flag_on; sshd_up; cat "$T/k_ed.pub" > "$(AK)"; chmod 600 "$(AK)"
+    mkdir -p "$(OPTD)/sbin" "$(OPTD)/etc/dropbear" "$(OPTD)/etc/init.d"
+    printf '#!/bin/sh\nexit 0\n' > "$(OPTD)/sbin/dropbear"; chmod 755 "$(OPTD)/sbin/dropbear"
+    printf '#!/bin/sh\nARGS="-p 2222 -a"\n' > "$(OPTD)/etc/init.d/S51dropbear"
+    : > "$(OPTD)/etc/dropbear/dropbear_ed25519_host_key"
+    json
+    check "empty host key" finding edb-hostkey-broken
+    check "stopped" finding entware-stopped
+    check "port from its start script" is "$(ent entware-dropbear port)" 2222
+    fake_proc dropbear "/opt/sbin/dropbear -p 2222" 1 2222 > /dev/null
+    json
+    check "running now" is "$(ent entware-dropbear running)" true
+    check "not stopped" nofinding entware-stopped
+    run report
+    check "report names it" has "Entware entware-dropbear: installed, running yes, port 2222"
+}
+
+for c in entware_openssh_in_use entware_openssh_root_password entware_openssh_broken entware_port_clash entware_dropbear \
+    healthy ssh_off_then_on flag_but_not_running running_but_off_next_boot locked_out_then_password \
     no_keys_no_password messy_key_file loose_home add_key restore legacy_dropbear host_fingerprints \
     failsafe_and_telnet pairing pairing_wrong_codes pairing_screen_closed servers port_taken port_change \
     password keys_only keepalive_and_reset settings_not_applied_and_boot logins host_keys telnet key_edit report; do

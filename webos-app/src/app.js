@@ -97,7 +97,17 @@
         'settings-not-applied': 'SSH isn\'t running with your settings (it was restarted another way).  Put my settings back fixes that.',
         'port-trial': 'SSH answers on two ports while you try the new one.  Log in on it, then keep it in SSH settings.',
         'failed-logins': 'Someone tried wrong passwords or user names recently.  More tools, Login history shows where from.',
-        'other-ssh': 'Another SSH server runs on this TV too.  This app only changes the Homebrew Channel\'s.'
+        'other-ssh': 'Another SSH server runs on this TV too.  This app only changes the Homebrew Channel\'s.',
+        'ssh-is-entware': 'SSH on this TV is Entware\'s, not the Homebrew Channel\'s.  This app checks it and fixes the keys file it reads, but leaves its settings alone.',
+        'entware-no-way-in': 'Nobody can log in to Entware\'s SSH: there\'s no working key, and it won\'t take a password for root (Entware keeps its own, in /opt/etc/shadow).  Set up a key: Entware\'s SSH reads the same keys file.',
+        'sshd-config-bad': 'Entware\'s OpenSSH refuses its settings file, /opt/etc/ssh/sshd_config, so it won\'t start.  More tools, SSH servers on this TV shows what it says is wrong.',
+        'sshd-root-denied': 'Entware\'s OpenSSH doesn\'t let root log in (PermitRootLogin in /opt/etc/ssh/sshd_config).  Set it to prohibit-password to log in with keys.',
+        'sshd-keyfile-elsewhere': 'Entware\'s OpenSSH reads keys from somewhere other than /home/root/.ssh/authorized_keys (AuthorizedKeysFile), so keys added here don\'t work there.',
+        'sshd-hostkey-broken': 'Entware\'s OpenSSH has a missing or empty host key in /opt/etc/ssh, so it won\'t start.  Over telnet, ssh-keygen -A makes new ones.',
+        'edb-hostkey-broken': 'Entware\'s dropbear has an empty host key file in /opt/etc/dropbear, which stops it from starting.  Delete that file and start it again to get a new one.',
+        'entware-port-clash': 'Entware\'s SSH is set to a port another server already uses (usually the Homebrew Channel\'s, on 22), so it can\'t start.  Give one of them another port.',
+        'entware-stopped': 'Entware\'s SSH is installed but not running.  Restart the TV, or over telnet run /opt/etc/init.d/rc.unslung start.',
+        'entware-no-autostart': 'Nothing starts Entware when the TV starts, so its SSH won\'t come back after a restart.  The Entware installer adds a startup script for that.'
     };
 
     function find(code) {
@@ -110,7 +120,18 @@
     }
     function ip() { return (state && state.ips && state.ips[0]) || 'TV_IP'; }
     function canLogIn(s) {
+        if (!s.listening && isEntware(s)) { return !!s.entwareLogin; }
         return s.listening && (s.keys > 0 || (!s.keysOnly && (s.password === 'alpine' || s.password === 'set')));
+    }
+    // SSH answers through Entware's server, not the Homebrew Channel's
+    function isEntware(s) { return /^entware-/.test((s && s.active) || ''); }
+    // The port people log in on: the Homebrew Channel's, or Entware's when that's the one in use
+    function loginPort(s) {
+        if (!s.listening && isEntware(s)) {
+            var e = (s.entware || []).filter(function (x) { return x.kind === s.active; })[0];
+            if (e && e.ports.length) { return e.ports[0]; }
+        }
+        return s.port || 22;
     }
     function sset() { return (state && state.settings) || {}; }
 
@@ -147,14 +168,19 @@
         $('dot').className = 'dot ' + (probs.length ? (ok ? 'dot-warn' : 'dot-bad') : 'dot-ok');
         $('headline').textContent = !probs.length ? T('SSH works') : (ok ? T('SSH works, with problems') : T('SSH needs fixing'));
         $('subline').textContent = ok
-            ? T('Log in as root at {ip}, port {port}.', { ip: ip(), port: s.port || 22 })
+            ? T('Log in as root at {ip}, port {port}.', { ip: ip(), port: loginPort(s) })
             : T('Nobody can log in over SSH right now.  The buttons on the right fix it.');
 
         var server = s.listening ? '<span class="ok">' + esc(T('running on port {port}', { port: s.port || 22 })) + '</span>'
             + (sset().trial ? esc(T(' (and {port} for now)', { port: sset().trial })) : '')
+            : isEntware(s) ? '<span class="ok">' + esc(T('Entware\'s, on port {port}', { port: loginPort(s) })) + '</span>'
             : (s.sshEnabled ? '<span class="bad">' + esc(T('on, but not running')) + '</span>' : '<span class="bad">' + esc(T('off')) + '</span>');
         var login;
-        if (s.keysOnly) { login = '<span class="ok">' + esc(T('keys only')) + '</span>' + esc(T(', and {n} keys', { n: s.keys || 0 })); }
+        if (!s.listening && isEntware(s)) {
+            login = s.keys ? '<span class="ok">' + esc(s.keys === 1 ? T('1 key') : T('{n} keys', { n: s.keys })) + '</span>'
+                : (s.entwareLogin ? esc(T('Entware\'s password')) : '<span class="bad">' + esc(T('nobody can log in')) + '</span>');
+        }
+        else if (s.keysOnly) { login = '<span class="ok">' + esc(T('keys only')) + '</span>' + esc(T(', and {n} keys', { n: s.keys || 0 })); }
         else if (s.password === 'alpine') { login = '<span class="warn">' + esc(T('password alpine')) + '</span>' + (s.keys ? esc(T(', and {n} keys', { n: s.keys })) : ''); }
         else if (s.password === 'set') { login = esc(T('your password')) + (s.keys ? esc(T(', and {n} keys', { n: s.keys })) : ''); }
         else if (s.keys) { login = '<span class="ok">' + esc(s.keys === 1 ? T('1 key') : T('{n} keys', { n: s.keys })) + '</span>'; }
@@ -701,10 +727,20 @@
         var s = state || {};
         var NAMES = { hbc: T('Homebrew Channel (dropbear)'), 'entware-openssh': T('Entware OpenSSH'), 'entware-dropbear': T('Entware dropbear'), devmode: T('Developer Mode'), other: T('Something else') };
         var list = s.servers || [];
-        if (!list.length) { message(T('SSH servers on this TV'), p(esc(T('No SSH server is running.')))); return; }
+        // Entware's servers that are installed but not running, and what's wrong with each
+        var stopped = (s.entware || []).filter(function (e) { return !e.running; });
+        var detail = (s.entware || []).filter(function (e) { return e.detail; });
+        if (!list.length && !stopped.length) { message(T('SSH servers on this TV'), p(esc(T('No SSH server is running.')))); return; }
+        var dev = list.filter(function (x) { return x.kind === 'devmode'; }).length;
         message(T('SSH servers on this TV'), '<table class="keys">' + list.map(function (x) {
             return '<tr><td>' + esc(NAMES[x.kind] || x.kind) + '</td><td>' + esc(x.ports.length ? T('port {port}', { port: x.ports.join(', ') }) : T('no port')) + '<br><small>' + esc(x.cmd) + '</small></td></tr>';
-        }).join('') + '</table>' + (list.length > 1 ? p(esc(T('This app only changes the Homebrew Channel\'s server.  The others are left alone.'))) : ''));
+        }).join('') + stopped.map(function (e) {
+            return '<tr><td>' + esc(NAMES[e.kind] || e.kind) + '</td><td><span class="warn">' + esc(T('installed, not running')) + '</span><br><small>'
+                + esc(T('set to port {port}', { port: e.port })) + '</small></td></tr>';
+        }).join('') + '</table>'
+            + detail.map(function (e) { return p(esc(T('{name} says: {detail}', { name: NAMES[e.kind] || e.kind, detail: e.detail }))); }).join('')
+            + (dev ? p(esc(T('Developer Mode\'s SSH is separate from root: user prisoner, port 9922, with the key and passphrase from the Developer Mode app.  It stops when the Developer Mode session runs out.'))) : '')
+            + (list.length + stopped.length > 1 ? p(esc(T('This app only changes the Homebrew Channel\'s server.  The others are left alone.'))) : ''));
     }
 
     function reportShow() {
@@ -722,13 +758,20 @@
         var h = '';
         var opts = s.legacyRsa ? '-o HostKeyAlgorithms=+ssh-rsa -o PubkeyAcceptedAlgorithms=+ssh-rsa ' : '';
         h += p(esc(T('From a computer on the same network, in Terminal (Mac, Linux) or PowerShell (Windows):')));
-        var port = s.port && s.port !== 22 ? '-p ' + s.port + ' ' : '';
+        var ent = !s.listening && isEntware(s);
+        if (ent) { opts = ''; }
+        var lp = loginPort(s);
+        var port = lp !== 22 ? '-p ' + lp + ' ' : '';
         h += pre('ssh ' + opts + port + 'root@' + ip());
-        if (s.legacyRsa) { h += p(esc(T('This TV\'s SSH server is old, so newer computers need the two -o options above.'))); }
-        h += p(esc(s.keysOnly || s.password === 'none' ? T('It logs in with your key.  No key yet?  Use Set up a key.')
-            : (sset().password ? T('Use your own password, or your key.') : (s.password === 'alpine' ? T('The password is alpine.') : T('It logs in with your key.  No key yet?  Use Set up a key.')))));
-        h += p(TC('If ssh says REMOTE HOST IDENTIFICATION HAS CHANGED, the TV\'s SSH keys were made again (after a reset, for example).  Check the fingerprint below, then run {cmd} on the computer and try again.', { cmd: 'ssh-keygen -R ' + (s.port && s.port !== 22 ? '[' + ip() + ']:' + s.port : ip()) }));
-        var hk = (s.hostKeys || []).filter(function (k) { return k.type === 'ssh-ed25519'; })[0] || (s.hostKeys || [])[0];
+        if (s.legacyRsa && !ent) { h += p(esc(T('This TV\'s SSH server is old, so newer computers need the two -o options above.'))); }
+        if (ent) { h += p(esc(s.entwareLogin && !s.keys ? T('Use the root password you set for Entware.') : T('It logs in with your key.  No key yet?  Use Set up a key.'))); }
+        else {
+            h += p(esc(s.keysOnly || s.password === 'none' ? T('It logs in with your key.  No key yet?  Use Set up a key.')
+                : (sset().password ? T('Use your own password, or your key.') : (s.password === 'alpine' ? T('The password is alpine.') : T('It logs in with your key.  No key yet?  Use Set up a key.')))));
+        }
+        h += p(TC('If ssh says REMOTE HOST IDENTIFICATION HAS CHANGED, the TV\'s SSH keys were made again (after a reset, for example).  Check the fingerprint below, then run {cmd} on the computer and try again.', { cmd: 'ssh-keygen -R ' + (lp !== 22 ? '[' + ip() + ']:' + lp : ip()) }));
+        // The fingerprints are the Homebrew Channel's dropbear's, not Entware's
+        var hk = ent ? null : (s.hostKeys || []).filter(function (k) { return k.type === 'ssh-ed25519'; })[0] || (s.hostKeys || [])[0];
         if (hk) { h += '<div class="fp">' + esc(hk.type + ' ' + hk.fp) + '</div>'; }
         message(T('How to log in'), h);
     }

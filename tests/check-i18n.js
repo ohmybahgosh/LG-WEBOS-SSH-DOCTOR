@@ -39,6 +39,9 @@ var texts = Object.keys(used);
 var codes = {};
 var cre = /\badd ([a-z-]+) (problem|tip)\b/g;
 while ((m = cre.exec(sh))) { codes[m[1]] = 1; }
+// Entware's findings, gathered by ent_check and added with their level later
+var ere = /_ek_codes="\$_ek_codes ([a-z-]+)"/g;
+while ((m = ere.exec(sh))) { codes[m[1]] = 1; }
 var bad = 0;
 Object.keys(codes).forEach(function (c) {
     if (fb[1].indexOf("'" + c + "'") < 0) { console.log('finding ' + c + ' has no text in app.js FINDINGS'); bad++; }
