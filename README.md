@@ -135,6 +135,7 @@ node tests/ui-check.js           # TV screens and the pairing page in a browser 
 
 ## Help and contributing
 
+- **How-tos and error messages:** the [wiki](https://github.com/ohmybahgosh/LG-WEBOS-SSH-DOCTOR/wiki) walks through every screen and the common SSH errors ([Troubleshooting](https://github.com/ohmybahgosh/LG-WEBOS-SSH-DOCTOR/wiki/Troubleshooting)).
 - **Stuck?**  Ask in [Discussions > Q&A](https://github.com/ohmybahgosh/LG-WEBOS-SSH-DOCTOR/discussions/new?category=q-a).  [SUPPORT.md](.github/SUPPORT.md) lists where everything goes.
 - **Something broken?**  Open a [bug report](https://github.com/ohmybahgosh/LG-WEBOS-SSH-DOCTOR/issues/new?template=bug-report.yml) with the app's **Report for getting help**.
 - **Tried it on your TV?**  A [TV report](https://github.com/ohmybahgosh/LG-WEBOS-SSH-DOCTOR/issues/new?template=tv-report.yml) helps, whether it worked or not.
