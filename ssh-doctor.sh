@@ -35,6 +35,13 @@
 #   logins [--json]   recent SSH logins and failed tries, from the TV's log
 #   hostkeys [--json] | hostkeys-reset   the TV's own SSH keys
 #   telnet-off | telnet-on
+#   set-bootfix on|off  check SSH at every start, and start it if it's down
+#   kit-save [DIR] | kit-list [--json] | kit-restore NAME
+#                     save keys, the TV's SSH keys and settings to a USB
+#                     drive, and put them back after a reset or re-root
+#   exposure [--json] | exposure-close
+#                     does the router forward SSH or telnet to the internet
+#                     (UPnP)?  exposure-close takes those forwards off
 #   report            a short report for asking for help, private bits left out
 #   pair-start [key|password] | pair-status | pair-accept | pair-reject |
 #   pair-stop         the pairing page, for a key or password from a PC or phone
@@ -75,6 +82,13 @@ PWHASH="$SDDIR/root.hash"
 HOOK="$R/var/lib/webosbrew/init.d/60-ssh-doctor"
 # Developer Mode's SSH: its own server, user prisoner, port 9922
 DEVMODE_PORT=9922
+# What the startup hook found at the last start: "TIME RESULT..."
+BOOTLAST="$SDDIR/boot.last"
+# USB drives (/tmp/usb/sda/sda1), and the folder the survival kit goes in
+USBROOT="$R/tmp/usb"
+KITNAME=ssh-doctor-kit
+# The router's port forwards from the last exposure check (upnp.js)
+EXPOSURE="$RUN/exposure.json"
 # Entware's own SSH servers: checked, never changed or restarted.  Entware's
 # programs read /opt/etc for their settings and its passwd and shadow, so its
 # root password isn't the one in /etc/shadow.
@@ -317,9 +331,10 @@ trial_port() { conf_get TRIAL ''; }
 ssh_ports() { _tp=$(trial_port); say "$(ssh_port)${_tp:+ $_tp}"; }
 keys_only() { [ "$(conf_get KEYSONLY 0)" = 1 ]; }
 keepalive() { [ "$(conf_get KEEPALIVE 0)" = 1 ]; }
+boot_fix() { [ "$(conf_get BOOTFIX 0)" = 1 ]; }
 # Anything set that the Homebrew Channel wouldn't do by itself?
 customized() {
-    [ -f "$PWHASH" ] || [ "$(ssh_port)" != 22 ] || [ -n "$(trial_port)" ] || keys_only || keepalive
+    [ -f "$PWHASH" ] || [ "$(ssh_port)" != 22 ] || [ -n "$(trial_port)" ] || keys_only || keepalive || boot_fix
 }
 
 # The options dropbear should run with; just -R (like the Homebrew Channel)
@@ -523,7 +538,10 @@ install_hook() {
 #!/bin/sh
 # Added by LG webOS SSH Doctor: puts its SSH settings back after a restart.
 # Remove them with Reset to defaults in the app, or: sh /var/lib/webosbrew/ssh-doctor/ssh-doctor.sh reset-settings
+# The app's own copy when it's installed (always the newest), or the one kept here
 S=/var/lib/webosbrew/ssh-doctor/ssh-doctor.sh
+A=/media/developer/apps/usr/palm/applications/org.ohmybahgosh.sshdoctor/assets/ssh-doctor.sh
+[ -f "$A" ] && S=$A
 [ -f "$S" ] && (sh "$S" boot < /dev/null > /var/lib/webosbrew/ssh-doctor/boot.log 2>&1 &)
 exit 0
 EOF
@@ -546,19 +564,61 @@ apply() {
 boot() {
     _i=0
     while [ $_i -lt 90 ] && [ -f "$FAILSAFE" ]; do sleep 1; _i=$((_i + 1)); done
-    [ -f "$FAILSAFE" ] && { say "$(date): the failsafe flag stayed, so the settings weren't applied."; return 0; }
+    if [ -f "$FAILSAFE" ]; then
+        say "$(date): the failsafe flag stayed, so the settings weren't applied."
+        boot_record failsafe
+        return 0
+    fi
     _i=0
     while [ $_i -lt 30 ] && [ -f "$SSHD_FLAG" ] && [ -z "$(hbc_masters)" ]; do sleep 1; _i=$((_i + 1)); servers_fresh; done
     say "$(date): applying $(dropbear_flags)"
-    apply
+    # In a subshell: if dropbear won't start with the settings, apply gives up
+    # (after starting it the usual way), and the check below still runs
+    (apply)
+    servers_fresh
+    boot_heal
 }
 
+boot_record() {
+    mkdir -p "$SDDIR"
+    printf '%s %s\n' "$(date +%Y-%m-%dT%H:%M:%S)" "$*" > "$BOOTLAST.tmp" && mv "$BOOTLAST.tmp" "$BOOTLAST"
+}
+
+# After the settings are back: is SSH up?  With "Fix SSH at startup" on,
+# start it when it should be running and isn't, and fix permissions that
+# make dropbear ignore the keys.  Never touches another program's port.
+boot_heal() {
+    _bh=''
+    _bp=$(ssh_port)
+    if [ -f "$SSHD_FLAG" ] && [ "$(port_owner "$_bp")" != hbc ]; then
+        if [ -n "$(port_owner "$_bp")" ]; then _bh="$_bh port-taken"
+        elif ! boot_fix; then _bh="$_bh down"
+        elif (ssh_on); then _bh="$_bh started"
+        else _bh="$_bh failed"
+        fi
+    fi
+    if boot_fix && [ -n "$(perm_problems)" ]; then
+        fix_perms
+        _bh="$_bh perms"
+    fi
+    _bh=${_bh# }
+    boot_record "${_bh:-ok}"
+    say "$(date): at startup: $(boot_result)"
+}
+
+# The last start's result: ok, started, perms, down, failed, port-taken or
+# failsafe (several, space-separated), or nothing before the first one
+boot_result() { sed -n 's/^[^ ]* //p' "$BOOTLAST" 2>/dev/null | awk 'NR == 1'; }
+boot_time() { awk 'NR == 1 { print $1 }' "$BOOTLAST" 2>/dev/null; }
+
 settings_json() {
-    printf '{"port":%s,"trial":%s,"keysOnly":%s,"keepalive":%s,"password":%s,"hook":%s,"applied":%s,"flags":%s}' \
+    printf '{"port":%s,"trial":%s,"keysOnly":%s,"keepalive":%s,"bootFix":%s,"password":%s,"hook":%s,"applied":%s,"flags":%s,"lastBoot":{"t":%s,"result":%s}}' \
         "$(ssh_port)" "$( [ -n "$(trial_port)" ] && trial_port || echo null)" \
         "$(keys_only && echo true || echo false)" "$(keepalive && echo true || echo false)" \
+        "$(boot_fix && echo true || echo false)" \
         "$([ -f "$PWHASH" ] && echo true || echo false)" "$([ -f "$HOOK" ] && echo true || echo false)" \
-        "$(settings_applied && echo true || echo false)" "$(js "$(running_flags)")"
+        "$(settings_applied && echo true || echo false)" "$(js "$(running_flags)")" \
+        "$(js "$(boot_time)")" "$(js "$(boot_result)")"
 }
 
 # ------------------------------------------------------------------ Entware
@@ -802,6 +862,15 @@ $1 "*) return 0 ;; esac
     [ "${_badpw:-0}" -ge 5 ] 2>/dev/null && add failed-logins tip
     case "$_active" in entware-*) ;; *) [ "$_others" != 0 ] && add other-ssh tip ;; esac
     [ "$_tel" = no ] && add telnet-off tip
+    # What the startup check did last time
+    case " $(boot_result) " in *" started "*) add boot-started tip ;; esac
+    case " $(boot_result) " in *" perms "*) add boot-perms tip ;; esac
+    # The router forwards SSH or telnet to the internet (from the last check)
+    if [ -f "$EXPOSURE" ]; then
+        _xp=$(exposed_ports)
+        case "$_xp" in *' 23 '*) add telnet-exposed problem ;; esac
+        if [ -n "$(printf '%s' "$_xp" | sed 's/ 23 / /' | tr -d ' ')" ]; then add ssh-exposed problem; fi
+    fi
 }
 
 # Empty host key files stop dropbear from starting
@@ -831,6 +900,7 @@ status_json() {
     printf '"port":%s,"portOwner":%s,"keysOnly":%s,"sftp":%s,"failedLogins":%s,' "$_port" "$(js "$_owner")" \
         "$([ "$_ko" = yes ] && echo true || echo false)" "$([ -x "$SFTP_SERVER" ] && echo true || echo false)" "${_badpw:-0}"
     printf '"settings":%s,"servers":%s,' "$(settings_json)" "$(servers_json)"
+    printf '"exposure":%s,' "$(if [ -f "$EXPOSURE" ]; then tr -d '\n' < "$EXPOSURE"; else echo null; fi)"
     printf '"active":%s,"entware":%s,"entwarePassword":%s,"entwareLogin":%s,' "$(js "$_active")" "$(ent_json)" \
         "$(js "$_entpw")" "$([ $_entlogin = yes ] && echo true || echo false)"
     printf '"sessions":{"%s":%s%s},' "$_port" "$(sessions_on "$_port")" "$([ -n "$_trial" ] && printf ',"%s":%s' "$_trial" "$(sessions_on "$_trial")")"
@@ -1102,6 +1172,14 @@ set_keepalive() {
     esac
 }
 
+set_bootfix() {
+    case "$1" in
+        on) conf_set BOOTFIX 1; apply > /dev/null; say "SSH is checked at every start now, and started if it's down." ;;
+        off) conf_set BOOTFIX ''; apply > /dev/null; say "SSH isn't checked at startup any more." ;;
+        *) die "Use on or off." ;;
+    esac
+}
+
 set_port() {
     _np=$1
     case "$_np" in ''|*[!0-9]*) die "A port is a number." ;; esac
@@ -1150,10 +1228,203 @@ reset_settings() {
     rm -f "$CONF" "$PWHASH"
     shadow_default
     remove_hook
-    rm -f "$SDDIR/boot.log"
+    rm -f "$SDDIR/boot.log" "$BOOTLAST"
     rmdir "$SDDIR" 2>/dev/null
     if [ -f "$SSHD_FLAG" ] && [ "$(running_flags)" != "-R" ]; then restart_dropbear > /dev/null 2>&1; fi
     say "Removed every SSH setting.  SSH runs the Homebrew Channel's way again: port 22, its usual password and key rules."
+}
+
+# ------------------------------------------------------------------ survival kit
+#
+# A copy of what makes logging in work, on a USB drive: the keys file, the
+# TV's own SSH keys (so computers don't warn REMOTE HOST IDENTIFICATION HAS
+# CHANGED after a reset), the settings and the password hash.  Put back with
+# backups first; a port in the kit is tried like a port change, with the
+# current port kept open.  Kits are DRIVE/ssh-doctor-kit/YYYYMMDD-HHMMSS.
+
+usb_dirs() {
+    for _u in "$USBROOT"/*/*; do
+        if [ -d "$_u" ] && [ -w "$_u" ]; then say "$_u"; fi
+    done
+    return 0
+}
+
+kit_save() {
+    _base=${1:-}
+    [ -n "$_base" ] || _base=$(usb_dirs | awk 'NR == 1')
+    [ -n "$_base" ] || die "No USB drive found.  Plug one into the TV and try again."
+    [ -d "$_base" ] || die "There's no folder $_base"
+    _hk=0
+    for _h in "$HOSTKEYS"/dropbear_*_host_key; do [ -s "$_h" ] && _hk=$((_hk + 1)); done
+    if [ ! -f "$AK" ] && [ $_hk = 0 ] && [ ! -f "$CONF" ] && [ ! -f "$PWHASH" ]; then
+        die "There's nothing to save yet: no keys, no settings."
+    fi
+    _k="$_base/$KITNAME/$(stamp)"
+    mkdir -p "$_k" || die "Couldn't write to the USB drive."
+    if [ -f "$AK" ]; then cp "$AK" "$_k/authorized_keys" || die "Couldn't write to the USB drive."; fi
+    if [ $_hk != 0 ]; then
+        mkdir -p "$_k/hostkeys"
+        for _h in "$HOSTKEYS"/dropbear_*_host_key; do [ -s "$_h" ] && cp "$_h" "$_k/hostkeys/"; done
+    fi
+    [ -f "$CONF" ] && cp "$CONF" "$_k/settings"
+    [ -f "$PWHASH" ] && cp "$PWHASH" "$_k/root.hash"
+    printf 'saved=%s\nversion=%s\nkeys=%s\nhostkeys=%s\nsettings=%s\npassword=%s\n' "$(date +%Y-%m-%dT%H:%M:%S)" "$VERSION" \
+        "$(key_count)" "$_hk" "$([ -f "$CONF" ] && echo yes || echo no)" "$([ -f "$PWHASH" ] && echo yes || echo no)" > "$_k/manifest"
+    chmod -R go-rwx "$_k" 2>/dev/null
+    sync 2>/dev/null
+    say "Saved to $_k"
+    say "It has the TV's private SSH keys in it, so keep the drive somewhere safe."
+}
+
+# Every kit on every USB drive: "NAME DIR"
+kits() {
+    for _m in "$USBROOT"/*/*/"$KITNAME"/*/manifest; do
+        [ -f "$_m" ] || continue
+        _d=${_m%/manifest}
+        say "${_d##*/} $_d"
+    done | sort -r
+    return 0
+}
+
+# One line of a kit's manifest: kit_value DIR NAME
+kit_value() { sed -n "s/^$2=//p" "$1/manifest" | awk 'NR == 1'; }
+
+kit_list() {
+    if [ "${1:-}" != --json ]; then kits; return 0; fi
+    printf '['; _f=1
+    kits | while read -r _n _d; do
+        [ $_f = 1 ] || printf ','; _f=0
+        _kn=$(kit_value "$_d" keys); case "$_kn" in ''|*[!0-9]*) _kn=0 ;; esac
+        _kh=$(kit_value "$_d" hostkeys); case "$_kh" in ''|*[!0-9]*) _kh=0 ;; esac
+        printf '{"name":%s,"saved":%s,"version":%s,"keys":%s,"hostKeys":%s,"settings":%s,"password":%s}' \
+            "$(js "$_n")" "$(js "$(kit_value "$_d" saved)")" "$(js "$(kit_value "$_d" version)")" "$_kn" "$_kh" \
+            "$([ "$(kit_value "$_d" settings)" = yes ] && echo true || echo false)" \
+            "$([ "$(kit_value "$_d" password)" = yes ] && echo true || echo false)"
+    done
+    printf ']\n'
+}
+
+kit_restore() {
+    case "$1" in ''|*[!0-9-]*) die "Not a kit name: $1" ;; esac
+    _k=$(kits | awk -v n="$1" '$1 == n { print $2 }' | awk 'NR == 1')
+    [ -n "$_k" ] || die "No kit called $1 on a USB drive."
+    mkdir -p "$RUN"
+    _first=no
+    if [ -f "$_k/authorized_keys" ]; then
+        clean_keys "$_k/authorized_keys" "$RUN/rej" "$RUN/found" > "$RUN/good"
+        _n=$(grep -c -v '^#' "$RUN/good" | tr -d ' ')
+        if [ "$_n" != 0 ]; then
+            [ "$(key_count)" = 0 ] && _first=yes
+            mkdir -p "$SSH_DIR"
+            backup "$AK"
+            cat "$RUN/good" > "$AK"
+            fix_perms
+            say "Put back the keys file: $_n keys."
+        fi
+        rm -f "$RUN/rej" "$RUN/found" "$RUN/good"
+    fi
+    _hk=0
+    for _h in "$_k"/hostkeys/dropbear_*_host_key; do [ -s "$_h" ] && _hk=$((_hk + 1)); done
+    if [ $_hk != 0 ]; then
+        mkdir -p "$HOSTKEYS"
+        _bk="$HOSTKEYS.ssh-doctor-$(stamp)"
+        cp -a "$HOSTKEYS" "$_bk" && say "Backed up the TV's SSH keys to $_bk"
+        for _h in "$_k"/hostkeys/dropbear_*_host_key; do
+            if [ -s "$_h" ]; then cp "$_h" "$HOSTKEYS/" && chmod 600 "$HOSTKEYS/${_h##*/}"; fi
+        done
+        say "Put back the TV's SSH keys, so computers that logged in before don't warn."
+    fi
+    if [ -f "$_k/settings" ]; then
+        _cur=$(ssh_port)
+        # Only settings this script knows, with sane values
+        _kp=$(sed -n 's/^PORT=\([0-9][0-9]*\)$/\1/p' "$_k/settings" | awk 'NR == 1')
+        _kk=$(sed -n 's/^KEYSONLY=\(1\)$/\1/p' "$_k/settings" | awk 'NR == 1')
+        _ka=$(sed -n 's/^KEEPALIVE=\(1\)$/\1/p' "$_k/settings" | awk 'NR == 1')
+        _kb=$(sed -n 's/^BOOTFIX=\(1\)$/\1/p' "$_k/settings" | awk 'NR == 1')
+        if [ -n "$_kp" ] && { [ "$_kp" -lt 1024 ] || [ "$_kp" -gt 65535 ]; }; then _kp=''; fi
+        # Keys only needs a key to log in with
+        [ "$(key_count)" = 0 ] && _kk=''
+        [ -f "$CONF" ] && cp "$CONF" "$CONF.ssh-doctor-$(stamp)"
+        conf_set KEYSONLY "$_kk"
+        conf_set KEEPALIVE "$_ka"
+        conf_set BOOTFIX "$_kb"
+        _np=${_kp:-22}
+        if [ "$_np" != "$_cur" ]; then
+            # Like a port change: the current port stays open until it's kept
+            conf_set PORT "$([ "$_np" = 22 ] || echo "$_np")"
+            conf_set TRIAL "$_cur"
+        fi
+        say "Put back the SSH settings."
+    fi
+    if [ -f "$_k/root.hash" ]; then
+        _ph=$(awk 'NR == 1' "$_k/root.hash")
+        # shellcheck disable=SC2016
+        if printf '%s' "$_ph" | grep -Eq '^\$6\$(rounds=[0-9]{4,9}\$)?[./0-9A-Za-z]{1,16}\$[./0-9A-Za-z]{86}$'; then
+            mkdir -p "$SDDIR" && chmod 700 "$SDDIR"
+            printf '%s\n' "$_ph" > "$PWHASH.tmp" && chmod 600 "$PWHASH.tmp" && mv "$PWHASH.tmp" "$PWHASH"
+            say "Put back your own password."
+        fi
+    fi
+    # Restart SSH, so it uses the keys and settings that were put back
+    (apply force) > /dev/null 2>&1
+    _t=$(trial_port)
+    _sp=$(ssh_port)
+    [ -n "$_t" ] && say "SSH answers on port $_sp from the saved settings, and on $_t until you keep port $_sp in SSH settings."
+    if [ "$_first" = yes ] && [ "$(password_state)" = alpine ] && [ ! -f "$PWHASH" ]; then
+        say "With keys back, the alpine password stops working after the next restart."
+    fi
+    return 0
+}
+
+# ------------------------------------------------------------------ exposure
+#
+# Does the home router forward SSH or telnet to the internet?  upnp.js asks
+# it the way games and apps open ports (UPnP).  Only routers with UPnP on
+# answer, and forwards set by hand in the router usually aren't listed.
+
+# The ports that would let someone in: SSH's, Entware's, and telnet
+watch_ports() {
+    _wp="$(ssh_ports) 23"
+    _ep=$(servers_list | awk '$2 ~ /^entware-/ { for (i = 4; i <= NF; i++) printf "%s ", $i }')
+    say "$_wp $_ep" | tr ' ' '\n' | grep . | sort -n -u | tr '\n' ' ' | sed 's/ *$//'
+}
+
+# The TV ports the router forwards, " 22 23 " style, from the last check
+exposed_ports() {
+    [ -f "$EXPOSURE" ] || return 0
+    _xp=$(tr -d '\n' < "$EXPOSURE" | sed -n 's/.*"exposed":\[\([^]]*\)\].*/\1/p' | tr '}' '\n' | sed -n 's/.*"internal":\([0-9]*\).*/\1/p' | sort -n -u | tr '\n' ' ')
+    [ -n "$_xp" ] && say " $_xp"
+    return 0
+}
+
+exposure_run() {
+    _n=$(find_node)
+    [ -n "$_n" ] || die "This needs Node.js."
+    mkdir -p "$RUN"
+    "$_n" "$HERE/upnp.js" "$1" "$(ips)" "$(watch_ports)" > "$EXPOSURE.tmp" 2>/dev/null
+    grep -q '"router"' "$EXPOSURE.tmp" 2>/dev/null || echo '{"router":"error","mappings":[],"exposed":[]}' > "$EXPOSURE.tmp"
+    mv "$EXPOSURE.tmp" "$EXPOSURE"
+}
+
+exposure() {
+    exposure_run list
+    if [ "${1:-}" = --json ]; then cat "$EXPOSURE"; return 0; fi
+    case "$(sed -n 's/.*"router":"\([a-z]*\)".*/\1/p' "$EXPOSURE")" in
+        none) say "No router answered.  Its UPnP may be off, so this can't tell: check its port forwarding by hand." ;;
+        error) say "The router couldn't be asked." ;;
+        *)
+            _x=$(exposed_ports)
+            if [ -z "$_x" ]; then say "The router doesn't forward SSH or telnet to this TV."
+            else say "The router forwards these TV ports to the internet:$_x"; fi ;;
+    esac
+}
+
+exposure_close() {
+    exposure_run close
+    _x=$(exposed_ports)
+    if grep -q '"closed":\[{' "$EXPOSURE"; then say "Took the forwards off the router."; fi
+    [ -z "$_x" ] || die "The router kept forwarding:$_x Remove it in the router's own settings."
+    say "The router doesn't forward SSH or telnet to this TV any more."
 }
 
 # ------------------------------------------------------------------ logins
@@ -1416,7 +1687,13 @@ case "$CMD" in
     telnet-off) telnet_off ;;
     telnet-on) telnet_on ;;
     report) report ;;
+    set-bootfix) set_bootfix "${1:-}" ;;
+    kit-save) kit_save "${1:-}" ;;
+    kit-list) kit_list "${1:-}" ;;
+    kit-restore) kit_restore "${1:-}" ;;
+    exposure) exposure "${1:-}" ;;
+    exposure-close) exposure_close ;;
     version) say "$VERSION" ;;
-    -h|--help|help) sed -n '2,41s/^# \{0,1\}//p' "$0" ;;
+    -h|--help|help) sed -n '2,48s/^# \{0,1\}//p' "$0" ;;
     *) die "Unknown command: $CMD (try: sh $0 help)" ;;
 esac

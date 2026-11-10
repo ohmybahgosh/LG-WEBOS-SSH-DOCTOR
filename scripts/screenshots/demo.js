@@ -1,6 +1,6 @@
 // Made-up answers from ssh-doctor.sh, so the TV app can run in a desktop
 // browser: load it before app.js.  Pick a TV with ?s=healthy, alpine, locked,
-// off, messy, entware or custom (its own settings, a port change underway).  ?pair=password
+// off, messy, entware, exposed or custom (its own settings, a port change underway).  ?pair=password
 // plays the pairing screen for a password.  The pairing screen plays out by itself: a phone connects,
 // then sends a key.
 (function () {
@@ -43,7 +43,14 @@
                 { pid: 7300, kind: 'devmode', name: 'sshd', ports: [9922], cmd: '/usr/sbin/sshd -f /etc/devmode/sshd_config' }],
             entware: [{ kind: 'entware-openssh', running: true, ports: [22], port: 22, startScript: true, passwordOff: true, problems: ['sshd-keyfile-elsewhere'], detail: '' },
                 { kind: 'entware-dropbear', running: false, ports: [], port: 22, startScript: true, passwordOff: false, problems: ['entware-port-clash'], detail: '' }],
-            findings: [f('entware-port-clash'), f('ssh-is-entware', 'tip'), f('sshd-keyfile-elsewhere', 'tip')] }
+            findings: [f('entware-port-clash'), f('ssh-is-entware', 'tip'), f('sshd-keyfile-elsewhere', 'tip')] },
+        // The router forwards SSH and telnet to the internet; SSH was started at the last restart
+        exposed: { password: 'alpine', keys: 0, keyFile: false,
+            settings: { port: 22, trial: null, keysOnly: false, keepalive: false, bootFix: true, password: false, hook: true, applied: true, flags: '-R', lastBoot: { t: '2026-11-09T07:02:11', result: 'started' } },
+            exposure: { router: 'found', name: 'ASUS GT-AXE16000', mappings: [], exposed: [
+                { protocol: 'TCP', external: 2222, internal: 22, client: '192.168.1.50', enabled: true, remote: '', description: 'ssh' },
+                { protocol: 'TCP', external: 23, internal: 23, client: '192.168.1.50', enabled: true, remote: '', description: '' }] },
+            findings: [f('telnet-exposed'), f('ssh-exposed'), f('boot-started', 'tip'), f('password-default', 'tip')] }
     };
     var st = {};
     for (var k in base) { st[k] = base[k]; }
@@ -76,7 +83,12 @@
             lastUsed: { 'SHA256:m3MvfV9IuUH4vKFN5CRBQGhIDOEanmNp29OKzXEOpRI': '2026-11-08T12:31:05Z' } }),
         'hostkeys --json': JSON.stringify(host.map(function (h) { return { type: h.type, fp: h.fp, line: h.type + ' AAAA' }; })),
         'report': 'LG webOS SSH Doctor 0.3.0 report\nwebOS: 9.2.0\nKernel: 5.4.268\nHomebrew Channel: installed, SSH switch yes, telnet yes, failsafe no\ndropbear: 2022.83, running yes, port 22, owner hbc\nOptions: wanted -R, running -R\nLogin: password none, keys 1, keys only no\nFindings: \nLogins in the log: 4 logins, 0 failed tries',
-        'pair-reject': '{"state":"rejected"}'
+        'pair-reject': '{"state":"rejected"}',
+        'exposure --json': JSON.stringify(st.exposure || { router: 'found', name: 'ASUS GT-AXE16000', mappings: [], exposed: [] }),
+        'kit-list --json': JSON.stringify([{ name: '20261109-071500', saved: '2026-11-09T07:15:00', version: '0.4.0', keys: 2, hostKeys: 3, settings: true, password: true }]),
+        'kit-save': 'Saved to /tmp/usb/sda/sda1/ssh-doctor-kit/20261109-071500\nIt has the TV\'s private SSH keys in it, so keep the drive somewhere safe.',
+        'kit-restore \'20261109-071500\'': 'Backed up /home/root/.ssh/authorized_keys to /home/root/.ssh/authorized_keys.ssh-doctor-20261109-071600\nPut back the keys file: 2 keys.\nBacked up the TV\'s SSH keys to /var/lib/webosbrew/sshd.ssh-doctor-20261109-071600\nPut back the TV\'s SSH keys, so computers that logged in before don\'t warn.\nPut back the SSH settings.\nPut back your own password.',
+        'exposure-close': 'Took the forwards off the router.\nThe router doesn\'t forward SSH or telnet to this TV any more.'
     };
     function pairState() {
         polls++;

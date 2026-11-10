@@ -95,6 +95,9 @@ footer .right { margin: 0 0 0 auto; }
 .mrow small { font-size: 21px; color: #6f7f78; font-weight: 500; margin-left: 30px; text-align: right; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mrow.focus { border-color: #22e584; background: #183026; }
 .mrow.fix { color: #22e584; }
+/* Long menus (More tools with Undo a change): tighter rows so they fit the screen */
+.menu.many .mrow { padding: 10px 28px; margin-bottom: 7px; font-size: 26px; }
+.menu.many .mrow small { font-size: 20px; }
 .in-label { display: block; font-size: 22px; color: #93a39b; margin: 14px 0 6px; }
 .in { width: 100%; font-size: 32px; padding: 14px 18px; border-radius: 14px; border: 3px solid #2b3632; background: #0b110f; color: #e8efeb; outline: none; font-family: "DejaVu Sans Mono", "Liberation Mono", Menlo, Consolas, monospace; }
 .in:focus { border-color: #22e584; }

@@ -78,6 +78,7 @@ The pairing page only runs while that screen is open.  It closes after one key, 
 - **Keys only:** passwords stop logging in.  It won't turn on until a key is on the TV, and **Go back to password login** turns it off again if you lose the key.
 - **SSH port:** pick 2222, 22022 or any free port from 1024 up.  The old port stays open alongside the new one until you've logged in on the new one and keep it, so a typo can't lock you out.  If dropbear won't start on the new port, it goes straight back to the old one.
 - **Keep idle sessions connected:** a keepalive every 30 seconds, so routers don't drop quiet sessions.
+- **Fix SSH at startup:** after every restart, checks that SSH came up and starts it if it didn't, and fixes keys file permissions dropbear would refuse.  The main screen says when it had to.  It never touches a port another program has.
 - **Reset to Homebrew Channel defaults** removes all of it, the startup script too.
 
 <p><img src="assets/screenshots/tv-settings-main.png" width="49%" alt="The main screen with a port change underway, a password of your own and keepalive on"> <img src="assets/screenshots/tv-settings.png" width="49%" alt="The SSH settings menu: your own password, keys only, SSH port, keepalive"></p>
@@ -90,6 +91,8 @@ The pairing page only runs while that screen is open.  It closes after one key, 
 - **This TV's SSH keys:** fingerprints to check a first login against, or make new ones
 - **Telnet:** turn the Homebrew Channel's passwordless telnet off once SSH works (or back on)
 - **File transfer (SFTP):** WinSCP, FileZilla and Cyberduck work with the Homebrew Channel's `sftp-server`; this shows the details to log in with
+- **Reachable from the internet?** asks your router (UPnP, the way games and apps open ports) whether it forwards the TV's SSH or telnet to the internet, and **Close it on the router** takes those forwards off.  It checks by itself each time the app opens.  Routers with UPnP off don't answer, and forwards set up by hand in the router usually aren't listed
+- **Save or restore my setup:** saves your keys, the TV's own SSH keys, your settings and your password's hash to a USB drive, and puts them back after a factory reset and rooting again, so logins work as before and computers don't warn REMOTE HOST IDENTIFICATION HAS CHANGED.  The TV's SSH keys are private, so keep the drive safe
 - **SSH servers on this TV,** and a **report for getting help** with no addresses, keys or names in it, as a QR code you can scan and paste into a GitHub issue
 
 <p><img src="assets/screenshots/tv-logins.png" width="70%" alt="Login history: logins by key and password, and failed tries with where they came from"> <img src="assets/screenshots/pair-phone-password.png" width="24%" alt="The pairing page on a phone, setting the TV's password"></p>
@@ -114,6 +117,9 @@ sh ssh-doctor.sh keys          # the keys that can log in, with fingerprints
 sh ssh-doctor.sh restore NAME  # put a backup back (see: sh ssh-doctor.sh backups)
 sh ssh-doctor.sh servers       # every SSH server on the TV, and its ports
 sh ssh-doctor.sh entware       # Entware's OpenSSH and dropbear, checked
+sh ssh-doctor.sh set-bootfix on          # check SSH at every start
+sh ssh-doctor.sh exposure      # does the router forward SSH or telnet?  exposure-close
+sh ssh-doctor.sh kit-save      # save to a USB drive; kit-list, kit-restore NAME
 sh ssh-doctor.sh set-port 2222 # move SSH; then: port-keep, or port-revert
 sh ssh-doctor.sh set-keys-only on        # or off; also: set-keepalive on|off
 sh ssh-doctor.sh set-password '$6$...'   # a hash, e.g. from: openssl passwd -6

@@ -35,7 +35,7 @@ async function tv(b) {
     const only = (process.env.SD_UI_ONLY || '').split(':');
     for (const lang of ['en', 'ru', 'es']) {
         if (only[0] && only[0] !== lang) { continue; }
-        for (const s of ['healthy', 'alpine', 'locked', 'off', 'messy', 'custom', 'entware']) {
+        for (const s of ['healthy', 'alpine', 'locked', 'off', 'messy', 'custom', 'entware', 'exposed']) {
             if (only[1] && only[1] !== s) { continue; }
             const c = await b.newContext({ viewport: { width: 1920, height: 1080 } });
             const p = await c.newPage();

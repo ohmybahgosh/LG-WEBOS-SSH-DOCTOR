@@ -2,6 +2,21 @@
 
 All notable changes to LG webOS SSH Doctor.  Versions follow [semantic versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Fix SSH at startup,** in SSH settings.  After every restart, SSH Doctor checks that SSH came up, starts it if it didn't, and fixes keys file permissions dropbear would refuse.  The main screen says when it had to.  It never touches a port another program has.
+- **Reachable from the internet?** in More tools.  Asks the router (UPnP) whether it forwards the TV's SSH or telnet to the internet, every time the app opens, and **Close it on the router** takes those forwards off.  A forwarded telnet port (root with no password) is flagged first.
+- **Save or restore my setup** in More tools.  Saves your keys, the TV's own SSH keys, your settings and your password's hash to a USB drive, and puts them back after a factory reset and rooting again, so computers don't warn REMOTE HOST IDENTIFICATION HAS CHANGED.  Everything it replaces is backed up first.
+- `set-bootfix`, `exposure`, `exposure-close`, `kit-save`, `kit-list` and `kit-restore` for the script on its own.
+
+### Changed
+
+- The startup script runs the app's own copy of `ssh-doctor.sh` when the app is installed, so an update takes effect at the next restart.
+- Long menus get tighter rows so they fit on screen.
+- Spanish: the Entware texts from 0.3.0 now use "usted" like the rest of the app.
+
 ## [0.3.0] - 2026-11-08
 
 ### Added

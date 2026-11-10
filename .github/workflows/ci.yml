@@ -16,7 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: ShellCheck the script (POSIX sh, like the TV)
-        run: shellcheck -s sh ssh-doctor.sh tests/fakebin/* webos-app/build.sh
+        run: shellcheck -s sh ssh-doctor.sh tests/fakebin/dropbear tests/fakebin/telnetd tests/fakebin/fakeproc.sh tests/fakebin/sshd webos-app/build.sh
       - name: ShellCheck the test suite
         run: shellcheck -s sh tests/run.sh
       - name: Script parses under dash and busybox sh
@@ -54,7 +54,7 @@ jobs:
         with:
           node-version: 20
       - name: The JavaScript parses
-        run: for f in webos-app/src/*.js *.js webos-app/gen-manifest.js tests/*.js scripts/screenshots/*.js; do node --check "$f" || exit 1; done
+        run: for f in webos-app/src/*.js *.js webos-app/gen-manifest.js tests/*.js tests/fakebin/*.js scripts/screenshots/*.js; do node --check "$f" || exit 1; done
       - name: Every text is translated
         run: node tests/check-i18n.js
       - name: Build the IPK and manifest

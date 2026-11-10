@@ -16,7 +16,7 @@ OUT="$HERE/out"
 rm -rf "$DIST" "$OUT"
 mkdir -p "$DIST/assets" "$DIST/vendor" "$OUT" "$ROOT/.cache"
 cp -R "$HERE/src/." "$DIST/"
-for f in ssh-doctor.sh keyinfo.js pair-server.js pair.html pair.js sshkey.js sha512crypt.js; do
+for f in ssh-doctor.sh keyinfo.js pair-server.js pair.html pair.js sshkey.js sha512crypt.js upnp.js; do
     cp "$ROOT/$f" "$DIST/assets/$f"
 done
 chmod 755 "$DIST/assets/ssh-doctor.sh"

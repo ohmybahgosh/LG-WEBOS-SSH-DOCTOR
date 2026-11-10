@@ -680,7 +680,143 @@ test_entware_dropbear() {
     check "report names it" has "Entware entware-dropbear: installed, running yes, port 2222"
 }
 
-for c in entware_openssh_in_use entware_openssh_root_password entware_openssh_broken entware_port_clash entware_dropbear \
+# ---------------------------------------------------------------- startup check, kit, exposure
+
+boot_result() { awk 'NR == 1 { $1 = ""; sub(/^ /, ""); print }' "$SD_ROOT/var/lib/webosbrew/ssh-doctor/boot.last" 2>/dev/null; }
+restart_tv() { for p in $(fake_pids); do fake_kill "$p"; done; }
+
+test_boot_fix() {
+    flag_on; sshd_up; cat "$T/k_ed.pub" > "$(AK)"; chmod 600 "$(AK)"
+    run set-bootfix on
+    check "on" has "checked at every start"
+    check "hook installed for it" test -x "$(HOOKF)"
+    json
+    check "bootFix in settings" sh -c "python3 -c \"import json; d=json.load(open('$T/s.json')); assert d['settings']['bootFix'] is True\""
+    check "the hook prefers the app's own script" grep -q 'org.ohmybahgosh.sshdoctor/assets/ssh-doctor.sh' "$(HOOKF)"
+    # A start where the Homebrew Channel's dropbear didn't come up, and the keys file got loose permissions
+    restart_tv; chmod 666 "$(AK)"
+    $SH "$SD_ROOT/var/lib/webosbrew/ssh-doctor/ssh-doctor.sh" boot > "$T/boot.log" 2>&1
+    check "started and fixed" is "$(boot_result)" "started perms"
+    check "permissions fixed" is "$(stat -c %a "$(AK)")" 600
+    json
+    check "running again" is "$(field listening)" true
+    check "says it started SSH" finding boot-started
+    check "says it fixed permissions" finding boot-perms
+    check "lastBoot in settings" sh -c "python3 -c \"import json; d=json.load(open('$T/s.json')); assert d['settings']['lastBoot']['result']=='started perms'\""
+    # A normal start
+    $SH "$ROOT/ssh-doctor.sh" boot > "$T/boot.log" 2>&1
+    check "ok when nothing's wrong" is "$(boot_result)" ok
+    json
+    check "no old news" nofinding boot-started
+    # Off: only noted, nothing started
+    run set-bootfix off
+    restart_tv
+    $SH "$ROOT/ssh-doctor.sh" boot > "$T/boot.log" 2>&1
+    check "down, left alone" is "$(boot_result)" down
+    json
+    check "not started" is "$(field listening)" false
+    # Another program on the port: never touched
+    run set-bootfix on
+    fake_proc sshd "/opt/sbin/sshd" 1 22 > /dev/null
+    $SH "$ROOT/ssh-doctor.sh" boot > "$T/boot.log" 2>&1
+    check "port taken, left alone" is "$(boot_result)" port-taken
+    check "the other server still there" sh -c "grep -l -x sshd '$SD_ROOT'/proc/*/comm >/dev/null"
+    run reset-settings
+    check "reset removes the record" test ! -e "$SD_ROOT/var/lib/webosbrew/ssh-doctor/boot.last"
+}
+
+host_key() {
+    python3 - "$SD_ROOT/var/lib/webosbrew/sshd/dropbear_ed25519_host_key" "$T/k_ed.pub" <<'PY'
+import sys, base64, struct
+blob = base64.b64decode(open(sys.argv[2]).read().split()[1])
+def s(b): return struct.pack('>I', len(b)) + b
+open(sys.argv[1], 'wb').write(s(b'ssh-ed25519') + s(b'\x01' * 32 + blob[-32:]))
+PY
+}
+USB() { printf '%s' "$SD_ROOT/tmp/usb/sda/sda1"; }
+
+test_kit() {
+    flag_on; sshd_up; cat "$T/k_ed.pub" > "$(AK)"; chmod 600 "$(AK)"; host_key
+    run kit-save
+    check "no USB drive: refused" is "$RC" 1
+    mkdir -p "$(USB)"
+    run set-port 2222; run port-keep; run set-keepalive on; run set-password "$HASH"
+    run kit-save
+    check "saved" has "Saved to $(USB)/ssh-doctor-kit/"
+    check "warns about the private keys" has "keep the drive somewhere safe"
+    run kit-list --json
+    _name=$(printf '%s' "$OUT" | python3 -c 'import json,sys; k=json.load(sys.stdin); assert len(k)==1 and k[0]["keys"]==1 and k[0]["hostKeys"]==1 and k[0]["settings"] and k[0]["password"], k; print(k[0]["name"])')
+    check "listed" test -n "$_name"
+    cp "$SD_ROOT/var/lib/webosbrew/sshd/dropbear_ed25519_host_key" "$T/hk.orig"
+    # A factory reset and re-root: no keys, new host keys, no settings, port 22
+    run reset-settings
+    rm -f "$(AK)" "$SD_ROOT"/var/lib/webosbrew/sshd/*
+    printf 'new' > "$SD_ROOT/var/lib/webosbrew/sshd/dropbear_ed25519_host_key"
+    alpine
+    run kit-restore "../$_name"
+    check "odd names refused" is "$RC" 1
+    run kit-restore "$_name"
+    check "restored" is "$RC" 0
+    check "keys back" grep -q -F "$(cut -d' ' -f2 "$T/k_ed.pub")" "$(AK)"
+    check "keys file permissions" is "$(stat -c %a "$(AK)")" 600
+    check "host key back, byte for byte" cmp -s "$T/hk.orig" "$SD_ROOT/var/lib/webosbrew/sshd/dropbear_ed25519_host_key"
+    check "new host key backed up" sh -c "grep -q new '$SD_ROOT'/var/lib/webosbrew/sshd.ssh-doctor-*/dropbear_ed25519_host_key"
+    check "password back" grep -q -F "root:$HASH:" "$SD_ROOT/etc/shadow"
+    check "port tried, old one kept open" has "until you keep port 2222"
+    json
+    check "running with the settings" is "$(flags)" "-R -p 2222 -p 22 -K 30"
+    check "trial" is "$(field port)" 2222
+    # A kit saying keys only, with no key in it: keys only isn't put back
+    _k2="$(USB)/ssh-doctor-kit/20260101-000000"
+    mkdir -p "$_k2"; printf 'KEYSONLY=1\nPORT=80\nEVIL=1\n' > "$_k2/settings"; echo 'keys=0' > "$_k2/manifest"
+    rm -f "$(AK)"
+    run kit-restore 20260101-000000
+    check "keys only not put back without a key" sh -c "! grep -q KEYSONLY '$SD_ROOT/var/lib/webosbrew/ssh-doctor/settings'"
+    check "unknown settings dropped" sh -c "! grep -q EVIL '$SD_ROOT/var/lib/webosbrew/ssh-doctor/settings'"
+    check "low port ignored (port 22)" sh -c "! grep -q 'PORT=80' '$SD_ROOT/var/lib/webosbrew/ssh-doctor/settings'"
+}
+
+IGD_PID=''
+igd_start() {
+    printf '%s' "$1" > "$T/igd.json"
+    rm -f "$T/igd.ready"
+    node "$HERE/fakebin/fake-igd.js" "$T/igd.json" "$T/igd.ready" > /dev/null 2>&1 &
+    IGD_PID=$!
+    _i=0; while [ ! -s "$T/igd.ready" ] && [ $_i -lt 50 ]; do sleep 0.1; _i=$((_i + 1)); done
+    SD_SSDP_ADDR="127.0.0.1:$(cat "$T/igd.ready")"
+    export SD_SSDP_ADDR SD_SSDP_WAIT=400
+}
+igd_stop() { [ -n "$IGD_PID" ] && kill "$IGD_PID" 2>/dev/null; IGD_PID=''; unset SD_SSDP_ADDR SD_SSDP_WAIT; }
+
+test_exposure() {
+    flag_on; sshd_up; cat "$T/k_ed.pub" > "$(AK)"; chmod 600 "$(AK)"
+    igd_start '[{"external":2222,"internal":22,"protocol":"TCP","client":"192.168.1.50","description":"tv"},{"external":8080,"internal":80,"protocol":"TCP","client":"192.168.1.9"}]'
+    run exposure
+    check "found" has "forwards these TV ports to the internet: 22"
+    json
+    check "a problem" finding ssh-exposed
+    check "not telnet" nofinding telnet-exposed
+    run exposure-close
+    check "closed" has "any more"
+    check "only the TV's forward removed" sh -c "! grep -q '\"internal\":22' '$T/igd.json' && grep -q 8080 '$T/igd.json'"
+    json
+    check "gone" nofinding ssh-exposed
+    igd_stop
+    igd_start '[{"external":23,"internal":23,"protocol":"TCP","client":"192.168.1.50"}]'
+    run exposure --json
+    check "json" has '"router":"found"'
+    json
+    check "telnet exposed" finding telnet-exposed
+    igd_stop
+    export SD_SSDP_ADDR=127.0.0.1:9 SD_SSDP_WAIT=300
+    run exposure
+    unset SD_SSDP_ADDR SD_SSDP_WAIT
+    check "no router" has "No router answered"
+    json
+    check "no finding without an answer" nofinding ssh-exposed
+}
+
+for c in boot_fix kit exposure entware_openssh_in_use entware_openssh_root_password entware_openssh_broken entware_port_clash entware_dropbear \
     healthy ssh_off_then_on flag_but_not_running running_but_off_next_boot locked_out_then_password \
     no_keys_no_password messy_key_file loose_home add_key restore legacy_dropbear host_fingerprints \
     failsafe_and_telnet pairing pairing_wrong_codes pairing_screen_closed servers port_taken port_change \

@@ -59,7 +59,7 @@ Object.keys(I.dicts).forEach(function (lang) {
 });
 
 // The repairs' messages (what the app shows after one), with sample values
-var REPAIRS = ['ssh_on', 'fix_keys', 'password_on', 'add_key', 'restore', 'backup', 'fix_perms'];
+var REPAIRS = ['ssh_on', 'fix_keys', 'password_on', 'add_key', 'restore', 'backup', 'fix_perms', 'kit_save', 'kit_restore', 'exposure_close', 'exposure_run'];
 var msgs = [];
 REPAIRS.forEach(function (fn) {
     var b = sh.match(new RegExp('\\n' + fn + '\\(\\) \\{([\\s\\S]*?)\\n\\}'));

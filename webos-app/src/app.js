@@ -107,7 +107,11 @@
         'edb-hostkey-broken': 'Entware\'s dropbear has an empty host key file in /opt/etc/dropbear, which stops it from starting.  Delete that file and start it again to get a new one.',
         'entware-port-clash': 'Entware\'s SSH is set to a port another server already uses (usually the Homebrew Channel\'s, on 22), so it can\'t start.  Give one of them another port.',
         'entware-stopped': 'Entware\'s SSH is installed but not running.  Restart the TV, or over telnet run /opt/etc/init.d/rc.unslung start.',
-        'entware-no-autostart': 'Nothing starts Entware when the TV starts, so its SSH won\'t come back after a restart.  The Entware installer adds a startup script for that.'
+        'entware-no-autostart': 'Nothing starts Entware when the TV starts, so its SSH won\'t come back after a restart.  The Entware installer adds a startup script for that.',
+        'boot-started': 'SSH wasn\'t running after the last restart, so SSH Doctor started it.',
+        'boot-perms': 'After the last restart, the keys file had loose permissions, so SSH Doctor fixed them.',
+        'ssh-exposed': 'Your router forwards this TV\'s SSH port to the internet, so anyone online can try to log in.  Close it on the router takes that forward off.',
+        'telnet-exposed': 'Your router forwards telnet to the internet: anyone online can get in as root with no password.  Close it on the router takes that forward off now.'
     };
 
     function find(code) {
@@ -147,6 +151,7 @@
             runScript('backups', function (ok2, out2) {
                 backups = (out2 || '').split('\n').filter(function (l) { return /^authorized_keys\.ssh-doctor-/.test(l); });
                 render();
+                exposureBackground();
                 if (cb) { cb(d); }
             });
         });
@@ -206,6 +211,7 @@
         show('fixkeys', find('keys-private') || find('keys-fixable') || find('keys-bad') || find('perms') || find('no-way-in'));
         show('apply', find('settings-not-applied'));
         show('hostfix', find('hostkey-broken'));
+        show('exposed', find('ssh-exposed') || find('telnet-exposed'));
         show('password', find('no-way-in') || find('no-password') || find('keys-only-no-keys'));
         $('settings-hint').textContent = settingsHint();
         $('keys-hint').textContent = s.keys === 1 ? T('1 key') : T('{n} keys', { n: s.keys || 0 });
@@ -427,7 +433,7 @@
         var items = m.items.filter(function (x) { return x; });
         m.items = items;
         if (m.at >= items.length) { m.at = items.length - 1; }
-        overlay('menu', m.title, '<div class="menu">' + items.map(function (x, i) {
+        overlay('menu', m.title, '<div class="menu' + (items.length > 8 ? ' many' : '') + '">' + items.map(function (x, i) {
             return '<div class="mrow' + (x.fix ? ' fix' : '') + (i === m.at ? ' focus' : '') + '" data-i="' + i + '"><span>' + esc(x.label)
                 + '</span><small>' + esc(x.hint || '') + '</small></div>';
         }).join('') + '</div>', T('OK selects, BACK goes back.'));
@@ -499,17 +505,19 @@
         if (st.password) { bits.push(T('own password')); }
         if (st.keysOnly) { bits.push(T('keys only')); }
         if (st.keepalive) { bits.push(T('keepalive')); }
+        if (st.bootFix) { bits.push(T('fixed at startup')); }
         return bits.length ? bits.join(', ') : T('Homebrew Channel defaults');
     }
 
     function settingsMenu(keep) {
         var st = sset(), s = state || {};
-        var custom = st.password || st.keysOnly || st.keepalive || (st.port && st.port !== 22) || st.trial;
+        var custom = st.password || st.keysOnly || st.keepalive || st.bootFix || (st.port && st.port !== 22) || st.trial;
         menu(T('SSH settings'), [
             { label: T('Your own password'), hint: st.password ? T('set') : (s.password === 'alpine' ? T('not set, alpine works') : T('not set')), fn: passwordMenu },
             { label: T('Keys only'), hint: st.keysOnly ? T('on: passwords don\'t log in') : T('off'), fn: keysOnlyToggle },
             { label: T('SSH port'), hint: st.trial ? T('{port}, and {old} for now', { port: st.port, old: st.trial }) : String(st.port || 22), fn: portMenu, fix: !!st.trial },
             { label: T('Keep idle sessions connected'), hint: st.keepalive ? T('on') : T('off'), fn: keepaliveToggle },
+            { label: T('Fix SSH at startup'), hint: st.bootFix ? T('on') : T('off'), fn: bootFixToggle },
             custom ? { label: T('Reset to Homebrew Channel defaults'), hint: T('port 22, its usual password rules'), fn: resetSettings } : null
         ], keep);
     }
@@ -567,6 +575,16 @@
             p(esc(on ? T('Keepalive is off.') : T('The TV now checks on idle sessions every 30 seconds, so routers don\'t drop them.'))));
     }
 
+    function bootFixToggle() {
+        if (sset().bootFix) {
+            act(T('Fix SSH at startup'), 'set-bootfix off', p(esc(T('SSH isn\'t checked at startup any more.'))));
+            return;
+        }
+        confirmThen(T('Fix SSH at startup'),
+            p(esc(T('After every restart, SSH Doctor checks that SSH came up.  If it didn\'t, it starts it, and it fixes keys file permissions the SSH server would refuse.  It never touches another program\'s port.'))),
+            function () { act(T('Fix SSH at startup'), 'set-bootfix on', p(esc(T('SSH is checked at every start now, and started if it\'s down.')))); });
+    }
+
     function portMenu() {
         var st = sset(), s = state || {};
         if (st.trial) {
@@ -607,7 +625,7 @@
 
     function resetSettings() {
         confirmThen(T('Reset to Homebrew Channel defaults'),
-            p(esc(T('This removes your password, keys only, keepalive and the port change.  SSH goes back to port 22 with the Homebrew Channel\'s usual password and key rules.  Keys stay.'))),
+            p(esc(T('This removes your password, keys only, keepalive, the startup check and the port change.  SSH goes back to port 22 with the Homebrew Channel\'s usual password and key rules.  Keys stay.'))),
             function () { act(T('Reset to Homebrew Channel defaults'), 'reset-settings', p(esc(T('Every SSH setting is removed.')))); });
     }
 
@@ -659,10 +677,96 @@
             { label: T('Telnet'), hint: s.telnetRunning ? T('on, no password') : T('off'), fn: telnetToggle },
             { label: T('File transfer (SFTP)'), hint: s.sftp ? T('works') : T('missing'), fn: sftpInfo },
             { label: T('SSH servers on this TV'), hint: T('{n} found', { n: (s.servers || []).length }), fn: serversInfo },
+            { label: T('Reachable from the internet?'), hint: exposureHint(), fn: exposureInfo, fix: find('ssh-exposed') || find('telnet-exposed') },
+            { label: T('Save or restore my setup'), hint: T('on a USB drive, for after a reset'), fn: kitMenu },
             { label: T('Report for getting help'), hint: T('no private details'), fn: reportShow },
             backups.length ? { label: T('Undo a change'), hint: T('put a backup back'), fn: actions.restore } : null,
             { label: T('Go back to password login'), hint: T('if you\'re locked out'), fn: actions.password }
         ]);
+    }
+
+    // ------------------------------------------------------------------ exposure
+
+    function exposureHint() {
+        var x = (state || {}).exposure;
+        if (!x) { return T('ask the router'); }
+        if (x.router !== 'found') { return T('the router didn\'t answer'); }
+        return x.exposed.length ? T('yes, the router forwards it') : T('no forwards found');
+    }
+
+    // Asked once each time the app opens, in the background: it takes a few seconds
+    var exposureAsked = false;
+    function exposureBackground() {
+        if (exposureAsked) { return; }
+        exposureAsked = true;
+        runScript('exposure --json', function () { if (!busy && !overlayMode) { refresh(); } });
+    }
+
+    function exposureInfo() {
+        if (busy) { return; }
+        busy = true;
+        overlay('busy', T('Reachable from the internet?'), '<span class="spinner"></span>' + esc(T('Asking the router…')), '');
+        runScript('exposure --json', function (ok, out) {
+            busy = false;
+            var x = parse(out);
+            if (!x || x.router === 'error') { message(T('Reachable from the internet?'), p(esc(T('The router couldn\'t be asked.')))); return; }
+            if (x.router === 'none') {
+                message(T('Reachable from the internet?'), p(esc(T('No router answered.  Its UPnP may be off, so this can\'t tell.  Check its port forwarding page for this TV\'s address and ports 22 and 23.'))));
+                refresh();
+                return;
+            }
+            var rows = x.exposed.map(function (m) {
+                return '<tr><td class="bad">' + esc(m.protocol + ' ' + m.external) + '</td><td>' + esc(T('to this TV, port {port}', { port: m.internal })
+                    + (m.internal === 23 ? ' (telnet)' : '')) + '<br><small>' + esc(m.description || '') + '</small></td></tr>';
+            }).join('');
+            if (!rows) {
+                message(T('Reachable from the internet?'), p(esc(T('{name} doesn\'t forward SSH or telnet to this TV.', { name: x.name || T('The router') })))
+                    + p(esc(T('Forwards set up by hand in the router\'s settings may not show here.'))));
+                refresh();
+                return;
+            }
+            refresh();
+            confirmThen(T('Reachable from the internet?'),
+                p(esc(T('{name} forwards these to this TV, so anyone on the internet can reach them:', { name: x.name || T('The router') })))
+                + '<table class="keys">' + rows + '</table>'
+                + p(esc(T('OK takes these forwards off the router.  If a program on your network asked for them, it may ask again.'))),
+                closeExposure);
+        });
+    }
+    function closeExposure() {
+        act(T('Close it on the router'), 'exposure-close', p(esc(T('The router doesn\'t forward SSH or telnet to this TV any more.'))));
+    }
+
+    // ------------------------------------------------------------------ survival kit
+
+    function kitMenu() {
+        menu(T('Save or restore my setup'), [
+            { label: T('Save to a USB drive'), hint: T('keys, the TV\'s SSH keys, settings'), fn: function () {
+                confirmThen(T('Save to a USB drive'),
+                    p(esc(T('This copies your keys, the TV\'s own SSH keys, your SSH settings and your password\'s hash to the first USB drive plugged into the TV.  After a factory reset and rooting again, Put back from a USB drive restores them, and computers won\'t warn that the TV changed.'))) +
+                    p(esc(T('The TV\'s own SSH keys are private: keep the drive somewhere safe.'))),
+                    function () { act(T('Save to a USB drive'), 'kit-save'); });
+            } },
+            { label: T('Put back from a USB drive'), hint: T('after a reset or rooting again'), fn: kitRestoreMenu }
+        ]);
+    }
+
+    function kitRestoreMenu() {
+        runScript('kit-list --json', function (ok, out) {
+            var k = parse(out) || [];
+            if (!k.length) { message(T('Put back from a USB drive'), p(esc(T('No saved setup was found.  Plug in the USB drive you saved it to, wait a few seconds, then try again.')))); return; }
+            menu(T('Put back from a USB drive'), k.slice(0, 10).map(function (x) {
+                var bits = [T('{n} keys', { n: x.keys })];
+                if (x.hostKeys) { bits.push(T('the TV\'s SSH keys')); }
+                if (x.settings) { bits.push(T('settings')); }
+                if (x.password) { bits.push(T('password')); }
+                return { label: (x.saved || x.name).replace('T', ' ').slice(0, 16), hint: bits.join(', '), fn: function () {
+                    confirmThen(T('Put back from a USB drive'),
+                        p(esc(T('This puts back what was saved: {what}.  Everything it replaces is backed up first.  If the saved port is different, the current one stays open until you keep the new one.', { what: bits.join(', ') }))),
+                        function () { act(T('Put back from a USB drive'), 'kit-restore ' + shq(x.name)); });
+                } };
+            }));
+        });
     }
 
     function loginHistory() {
@@ -795,6 +899,7 @@
         settings: function () { settingsMenu(); },
         tools: toolsMenu,
         apply: function () { act(T('Put my settings back'), 'apply', p(esc(T('SSH runs with your settings again.')))); },
+        exposed: closeExposure,
         hostfix: function () { act(T('Repair the TV\'s SSH keys'), 'hostkeys-reset', p(esc(T('Done.  New keys are made at the next login.')))); },
         restore: function () {
             var b = backups[backups.length - 1];
