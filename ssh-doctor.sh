@@ -43,8 +43,9 @@
 #                     does the router forward SSH or telnet to the internet
 #                     (UPnP)?  exposure-close takes those forwards off
 #   report            a short report for asking for help, private bits left out
-#   pair-start [key|password] | pair-status | pair-accept | pair-reject |
-#   pair-stop         the pairing page, for a key or password from a PC or phone
+#   pair-start [key|password|info] | pair-status | pair-accept | pair-reject |
+#   pair-stop [info]  the pairing page, for a key or password from a PC or
+#                     phone, or (info) everything ready to copy, read only
 #   version
 #
 # Paths can be moved under SD_ROOT for the tests.
@@ -117,6 +118,11 @@ die() { say "$*" >&2; exit 1; }
 # JSON string, with the characters JSON needs escaped
 js() {
     printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr -d '\000-\010\013-\037' | tr '\t\n' '  ')"
+}
+
+# JSON string that keeps line breaks (as \n)
+jsl() {
+    printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr -d '\000-\010\013-\037' | tr '\t' ' ' | awk 'NR > 1 { printf "\\n" } { printf "%s", $0 }')"
 }
 
 stamp() { date +%Y%m%d-%H%M%S; }
@@ -1572,7 +1578,13 @@ report() {
 pair_pid() { cat "$PAIR/pid" 2>/dev/null; }
 pair_alive() { _p=$(pair_pid); [ -n "$_p" ] && kill -0 "$_p" 2>/dev/null; }
 
+# pair-stop [PURPOSE]: with a purpose, only when the page running is for it,
+# so closing the read-only page can't stop a pairing started right after
 pair_stop() {
+    if [ -n "${1:-}" ] && [ -d "$PAIR" ] && ! grep -q "\"purpose\":\"$1\"" "$PAIR/info.json" 2>/dev/null; then
+        say '{"state":"other"}'
+        return 0
+    fi
     if pair_alive; then
         : > "$PAIR/stop"
         kill "$(pair_pid)" 2>/dev/null
@@ -1583,7 +1595,7 @@ pair_stop() {
 
 pair_start() {
     _purpose=${1:-key}
-    case "$_purpose" in key|password) ;; *) die '{"error":"bad-purpose"}' ;; esac
+    case "$_purpose" in key|password|info) ;; *) die '{"error":"bad-purpose"}' ;; esac
     _n=$(find_node)
     [ -n "$_n" ] || die '{"error":"no-node"}'
     pair_stop > /dev/null
@@ -1595,12 +1607,24 @@ pair_start() {
     # With Entware's SSH answering instead, its port, and no host keys or old
     # dropbear options: those are the Homebrew Channel's
     if [ "$(port_owner "$(ssh_port)")" != hbc ] && [ -n "$(entware_port)" ]; then
-        printf '{"purpose":%s,"port":%s,"legacyRsa":false,"hostKeys":[]}\n' "$(js "$_purpose")" "$(entware_port)" > "$PAIR/info.json"
+        _ip=$(entware_port); _il=false; _ih='[]'
     else
-        printf '{"purpose":%s,"port":%s,"legacyRsa":%s,"hostKeys":%s}\n' "$(js "$_purpose")" "$(ssh_port)" \
-            "$(legacy_rsa "$(dropbear_version)" && echo true || echo false)" \
-            "$("$_n" "$HERE/keyinfo.js" hostpub "$HOSTKEYS" --json 2>/dev/null || echo '[]')" > "$PAIR/info.json"
+        _ip=$(ssh_port)
+        _il=false; legacy_rsa "$(dropbear_version)" && _il=true
+        _ih=$("$_n" "$HERE/keyinfo.js" hostpub "$HOSTKEYS" --json 2>/dev/null)
+        [ -n "$_ih" ] || _ih='[]'
     fi
+    # The read-only page also gets the keys that can log in, the report for
+    # getting help (no addresses or keys in it) and how logging in works
+    _ix=''
+    if [ "$_purpose" = info ]; then
+        _ik=$(keys_list --json 2>/dev/null)
+        [ -n "$_ik" ] || _ik='[]'
+        _ix=$(printf ',"keys":%s,"report":%s,"sftp":%s,"password":%s,"keysOnly":%s,"version":%s' "$_ik" "$(jsl "$(report 2>/dev/null)")" \
+            "$([ -x "$SFTP_SERVER" ] && echo true || echo false)" "$(js "$(password_state)")" \
+            "$(keys_only && echo true || echo false)" "$(js "$VERSION")")
+    fi
+    printf '{"purpose":%s,"port":%s,"legacyRsa":%s,"hostKeys":%s%s}\n' "$(js "$_purpose")" "$_ip" "$_il" "$_ih" "$_ix" > "$PAIR/info.json"
     if command -v setsid >/dev/null 2>&1; then
         setsid "$_n" "$HERE/pair-server.js" "$PAIR" "$PAIR_PORT" "$(ips)" < /dev/null > "$PAIR/log" 2>&1 &
     else
@@ -1673,7 +1697,7 @@ case "$CMD" in
     pair-status) pair_status ;;
     pair-accept) pair_accept ;;
     pair-reject) pair_reject ;;
-    pair-stop) pair_stop ;;
+    pair-stop) pair_stop "${1:-}" ;;
     key-remove) key_edit remove "${1:-}" ;;
     key-rename) key_edit rename "${1:-}" "${2:-}" ;;
     servers) if [ "${1:-}" = --json ]; then servers_json; echo; else servers_list; fi ;;

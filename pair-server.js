@@ -13,7 +13,13 @@
  * STATE_DIR/state.json; STATE_DIR/info.json (from ssh-doctor.sh) has the
  * purpose, the SSH port and the TV's host keys.  Plain ES5 for older Node.js.
  *
- * Stops itself: 5 minutes without a code, 5 minutes after pairing, after one
+ * Or, for "info" (opened from How to log in, the report or the TV's keys),
+ * a read-only page with everything ready to copy: how to log in, the TV's
+ * fingerprints and known_hosts lines, an SSH config, the keys that can log
+ * in, and the report for getting help.  Its code works for any number of
+ * devices while the screen is open, and it changes nothing on the TV.
+ *
+ * Stops itself: 5 minutes without a code (15 for info), 5 minutes after pairing, after one
  * key is confirmed or turned down, after 15 wrong codes, or 30 seconds after
  * the TV stops asking for its state (the screen was closed).
  */
@@ -33,6 +39,7 @@ var CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O, 1/I/L
 var TRIES = 5;
 var MAX_CODES = 3;
 var WAIT_MS = 5 * 60 * 1000;
+var INFO_MS = 15 * 60 * 1000;
 var ALIVE_MS = 30 * 1000;
 
 var INFO = { purpose: 'key', port: 22, legacyRsa: false, hostKeys: [] };
@@ -42,6 +49,7 @@ var HASH_RE = /^\$6\$(rounds=[0-9]{4,9}\$)?[.\/0-9A-Za-z]{1,16}\$[.\/0-9A-Za-z]{
 var state = { state: 'starting', purpose: INFO.purpose, code: '', port: 0, ips: IPS, expires: 0, triesLeft: TRIES, key: null, password: false };
 var codesLeft = MAX_CODES;
 var token = null;
+var viewers = [];       // info mode: one token per device that typed the code
 var server = null;
 var finishing = false;
 
@@ -126,13 +134,28 @@ function body(req, cb) {
     });
 }
 
-function authed(t) { return token !== null && typeof t === 'string' && same(t, token); }
+function authed(t) {
+    if (typeof t !== 'string') { return false; }
+    if (token !== null && same(t, token)) { return true; }
+    for (var i = 0; i < viewers.length; i++) { if (same(t, viewers[i])) { return true; } }
+    return false;
+}
 
 function apiCode(req, res) {
     body(req, function (b) {
         if (!b) { return json(res, 400, { error: 'bad-request' }); }
         if (state.state !== 'waiting') { return json(res, 409, { error: state.state === 'starting' ? 'not-ready' : 'busy' }); }
         if (same(norm(b.code), norm(state.code))) {
+            if (INFO.purpose === 'info') {
+                // Read-only: the code stays for the next device
+                var t = crypto.randomBytes(16).toString('hex');
+                viewers.push(t);
+                if (viewers.length > 20) { viewers.shift(); }
+                state.viewers = viewers.length;
+                state.triesLeft = TRIES;
+                save();
+                return json(res, 200, { ok: true, token: t, info: publicInfo() });
+            }
             token = crypto.randomBytes(16).toString('hex');
             state.state = 'paired';
             state.code = '';
@@ -146,7 +169,7 @@ function apiCode(req, res) {
         if (codesLeft <= 0) { json(res, 403, { error: 'locked' }); return finish('locked'); }
         state.code = newCode();
         state.triesLeft = TRIES;
-        state.expires = now() + WAIT_MS;
+        state.expires = now() + (INFO.purpose === 'info' ? INFO_MS : WAIT_MS);
         save();
         return json(res, 403, { error: 'new-code' });
     });
@@ -154,17 +177,26 @@ function apiCode(req, res) {
 
 // What the page needs for how-to-log-in and the SSH config it offers
 function publicInfo() {
-    return {
+    var o = {
         purpose: INFO.purpose, port: INFO.port, legacyRsa: !!INFO.legacyRsa,
         hostKeys: (INFO.hostKeys || []).map(function (k) { return { type: k.type, fp: k.fp, line: k.line }; })
     };
+    if (INFO.purpose === 'info') {
+        o.keys = (INFO.keys || []).map(function (k) { return { type: k.type, fp: k.fp, comment: k.comment, bits: k.bits }; });
+        o.report = String(INFO.report || '');
+        o.sftp = !!INFO.sftp;
+        o.password = String(INFO.password || '');
+        o.keysOnly = !!INFO.keysOnly;
+        o.version = String(INFO.version || '');
+    }
+    return o;
 }
 
 function apiPassword(req, res) {
     body(req, function (b) {
         if (!b || !authed(b.token)) { return json(res, 403, { error: 'not-paired' }); }
-        if (state.state !== 'paired') { return json(res, 409, { error: 'busy' }); }
         if (INFO.purpose !== 'password') { return json(res, 400, { error: 'wrong-purpose' }); }
+        if (state.state !== 'paired') { return json(res, 409, { error: 'busy' }); }
         var h = String(b.hash || '');
         if (!HASH_RE.test(h)) { return json(res, 400, { error: 'not-a-hash' }); }
         fs.writeFileSync(DIR + '/pending.hash', h + '\n', { mode: 384 });
@@ -179,8 +211,8 @@ function apiPassword(req, res) {
 function apiKey(req, res) {
     body(req, function (b) {
         if (!b || !authed(b.token)) { return json(res, 403, { error: 'not-paired' }); }
-        if (state.state !== 'paired') { return json(res, 409, { error: 'busy' }); }
         if (INFO.purpose !== 'key') { return json(res, 400, { error: 'wrong-purpose' }); }
+        if (state.state !== 'paired') { return json(res, 409, { error: 'busy' }); }
         var text = String(b.key || '');
         if (/PRIVATE KEY|PuTTY-User-Key-File/.test(text)) { return json(res, 400, { error: 'private' }); }
         var lines = text.replace(/\r/g, '').split('\n').filter(function (l) { return /\S/.test(l) && !/^\s*#/.test(l); });
@@ -268,7 +300,7 @@ function listen(port, triesLeft) {
         state.port = port;
         state.state = 'waiting';
         state.code = newCode();
-        state.expires = now() + WAIT_MS;
+        state.expires = now() + (INFO.purpose === 'info' ? INFO_MS : WAIT_MS);
         save();
         setInterval(tick, 1000);
     });

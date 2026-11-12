@@ -23,7 +23,7 @@ const P = (m) => { problems++; console.log('PROBLEM ' + m); };
 
 const SMALL = /\b(the|is|are|was|it|this|that|and|but|or|to|of|on|in|with|your|for|key|keys|press|log|set|fix|turn|now|check|nobody|password)\b/i;
 const ENG = /[A-Za-z']{2,}(?:[ ,]+[A-Za-z'-]{2,}){2,}/;
-const OKW = /SSH Doctor|Homebrew Channel|LG-WEBOS-SSH-DOCTOR|github\.com\S*|root@\S+|ssh(-keygen)? [^\n]*|SHA256:\S+|ssh-ed25519|ssh-rsa|ecdsa[^\s]*|authorized_keys\S*|\/home\/root\S*|bob@\S+|lgtv-\S+|alpine|PowerShell|Terminal|Mac|Linux|Windows|Telnet|telnet|Node\.js|dropbear [0-9.]+|\/\S*\/(dropbear|sshd)[^\n]*|REMOTE HOST IDENTIFICATION HAS CHANGED|crlf|private|rootmy\.tv|-o|\b(bash|tmux|nano|vim|htop|git|rsync)\b/g;
+const OKW = /SSH Doctor|Homebrew Channel|LG-WEBOS-SSH-DOCTOR|github\.com\S*|root@\S+|ssh(-keygen)? [^\n]*|SHA256:\S+|ssh-ed25519|ssh-rsa|ecdsa[^\s]*|authorized_keys\S*|\/home\/root\S*|bob@\S+|lgtv-\S+|alpine|PowerShell|Terminal|Mac|Linux|Windows|Telnet|telnet|Node\.js|dropbear [0-9.]+|\/\S*\/(dropbear|sshd)[^\n]*|REMOTE HOST IDENTIFICATION HAS CHANGED|crlf|private|rootmy\.tv|-o|\b(bash|tmux|nano|vim|htop|git|rsync)\b|Advanced, SSH, Authentication, Private key file|Settings, SFTP, Add key file|SSH Private Key/g;
 
 async function tv(b) {
     const work = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-ui-'));
@@ -60,7 +60,10 @@ async function tv(b) {
                     if (!ov.classList.contains('hidden')) {
                         const pr = document.querySelector('.panel').getBoundingClientRect();
                         if (pr.top < 0 || pr.bottom > 1080) { out.msgs.push('panel off screen ' + Math.round(pr.top) + '..' + Math.round(pr.bottom)); }
-                        out.ov = document.querySelector('.panel').innerText;
+                        // The report stays in English on purpose: it goes in a GitHub issue
+                        const pc = document.querySelector('.panel').cloneNode(true);
+                        pc.querySelectorAll('pre.report').forEach((x) => x.remove());
+                        out.ov = pc.innerText;
                     }
                     out.app = document.getElementById('app').innerText;
                     return out;
@@ -257,6 +260,36 @@ async function pairing(b) {
         await c.close();
     }
     sd(['pair-stop']);
+
+    // The read-only page from How to log in: the QR code's #c= connects
+    // straight away, on a phone and a computer at once, and everything copies
+    const is = JSON.parse(sd(['pair-start', 'info']));
+    for (const vp of [{ name: 'phone', width: 390, height: 844, mobile: true }, { name: 'desktop', width: 1280, height: 800, mobile: false }]) {
+        const c = await b.newContext({ viewport: { width: vp.width, height: vp.height }, isMobile: vp.mobile, permissions: ['clipboard-read', 'clipboard-write'],
+            userAgent: vp.mobile ? 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)' : undefined });
+        const p = await c.newPage();
+        const errs = [];
+        p.on('pageerror', (e) => errs.push(String(e)));
+        await p.goto('http://127.0.0.1:' + is.port + '/#c=' + is.code.replace('-', '') + (vp.mobile ? '&s=report' : ''));
+        await p.waitForSelector('#step-info', { state: 'visible', timeout: 5000 }).catch(() => P(`info ${vp.name}: page not shown`));
+        if (/#c=/.test(p.url())) { P(`info ${vp.name}: the code stayed in the address bar`); }
+        const how = await p.textContent('#howto');
+        const want = vp.mobile ? 'Open in an SSH app' : 'ssh root@127.0.0.1';
+        if (how.indexOf(want) < 0) { P(`info ${vp.name}: instructions missing "${want}": ${how}`); }
+        if ((await p.textContent('#info-report-text')).indexOf('SSH Doctor') < 0) { P(`info ${vp.name}: no report`); }
+        const copies = await p.$$('button.copy');
+        if (copies.length < 3) { P(`info ${vp.name}: only ${copies.length} copy buttons`); }
+        await copies[0].click();
+        const label = await copies[0].textContent();
+        if (label !== 'Copied') { P(`info ${vp.name}: copy button says ${label}`); }
+        if (OUT) { await p.screenshot({ path: path.join(OUT, `info-${vp.name}.png`), fullPage: true }); }
+        const over = await p.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
+        if (over) { P(`info ${vp.name}: page wider than the screen`); }
+        if (errs.length) { P(`info ${vp.name}: page errors ${JSON.stringify(errs)}`); }
+        await c.close();
+    }
+    if (JSON.parse(sd(['pair-status'])).state !== 'waiting') { P('info: the page stopped after two devices'); }
+    sd(['pair-stop', 'info']);
     fs.rmSync(T, { recursive: true, force: true });
 }
 

@@ -100,6 +100,8 @@ The pairing page only runs while that screen is open.  It closes after one key, 
 
 After a key is added, the pairing page also offers a ready-made `~/.ssh/config` entry (so `ssh lgtv` just works), the `known_hosts` lines for the TV, a Windows Terminal profile, and SFTP and `scp` instructions.
 
+**Copy it on your phone or computer.**  **How to log in**, **Report for getting help** and the TV's key fingerprints each show a QR code beside them.  Scan it and a page opens on your phone with everything ready to copy, one tap each: the login command for Mac, Linux, Windows, PuTTY or SFTP, an **Open in an SSH app** link for Termius and the like, the TV's fingerprints, the `ssh-keygen -R` line for a changed host key, an SSH config, the keys that can log in, and the report with links to open a bug report.  On a computer, type the address and the code instead.  It's read only, works on several devices at once, and stops when you close that screen on the TV.  The QR code on the pairing screen carries its code too, so scanning connects straight away.
+
 ## What it will never do
 
 Touch system partitions, change the Homebrew Channel's own files, change another SSH server than the Homebrew Channel's, turn telnet off unless you ask, or send your keys or password anywhere.  It warns before anything that would turn password login off, because adding the first key disables `alpine` at the next boot, and that catches a lot of people out.

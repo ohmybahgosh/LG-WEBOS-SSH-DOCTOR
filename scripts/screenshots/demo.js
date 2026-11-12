@@ -58,6 +58,7 @@
     for (k in o) { st[k] = o[k]; }
 
     var polls = 0;
+    var infoMode = false;
     var purpose = 'key';
     var started = 0;
     var REPLIES = {
@@ -105,6 +106,10 @@
     window.SD_DEMO = function (args, cb) {
         setTimeout(function () {
             if (args === 'status --json') { return cb(true, JSON.stringify(st), ''); }
+            // The read-only page for a phone (How to log in, the report, the TV's keys)
+            if (args === 'pair-start info') { infoMode = true; return cb(true, JSON.stringify({ state: 'waiting', purpose: 'info', code: 'Q4M-7TZ', port: 28622, ips: st.ips, triesLeft: 5 }), ''); }
+            if (args === 'pair-stop info') { infoMode = false; return cb(true, '{"state":"stopped"}', ''); }
+            if (args === 'pair-status' && infoMode) { return cb(true, JSON.stringify({ state: 'waiting', purpose: 'info', code: 'Q4M-7TZ', port: 28622, ips: st.ips, triesLeft: 5 }), ''); }
             if (args.indexOf('pair-start') === 0) { purpose = args.indexOf('password') > 0 ? 'password' : 'key'; started = new Date().getTime(); polls = 0; return cb(true, JSON.stringify(pairState()), ''); }
             if (args === 'pair-status') { return cb(true, JSON.stringify(pairState()), ''); }
             if (args.indexOf('restore') === 0) { return cb(true, 'Put authorized_keys.ssh-doctor-20261108-120000 back as authorized_keys.', ''); }

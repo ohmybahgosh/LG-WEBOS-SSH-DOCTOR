@@ -229,6 +229,7 @@
     // ------------------------------------------------------------------ overlay
 
     function overlay(mode, title, bodyHtml, hint) {
+        shareStop();
         overlayMode = mode;
         $('overlay-title').textContent = title;
         $('overlay-body').innerHTML = bodyHtml;
@@ -236,6 +237,7 @@
         $('overlay').className = 'overlay';
     }
     function closeOverlay() {
+        shareStop();
         overlayMode = null;
         menuStack = [];
         inputDone = null;
@@ -244,6 +246,65 @@
         focusCurrent();
     }
     function message(title, html) { overlay('message', title, html, T('Press OK or BACK to close.')); }
+
+    // ------------------------------------------------------------------ on a phone or computer
+    //
+    // A message with a QR code beside it.  Scanning it opens a read-only page
+    // on the phone (or type the address and code on a computer) with all of
+    // it ready to copy: how to log in, fingerprints, keys, the report.  The
+    // page runs only while this message is open.
+
+    var share = null;
+    function shareStop() {
+        if (!share) { return; }
+        if (share.timer) { clearInterval(share.timer); }
+        share = null;
+        runScript('pair-stop info', function () {});
+    }
+    function messageShared(title, html, section, fallbackHtml) {
+        message(title, '<div class="share"><div class="share-main">' + html + '</div><div class="share-side" id="share-side">'
+            + '<span class="spinner"></span></div></div>');
+        var mine = { timer: null, section: section || '', url: '', code: '' };
+        share = mine;
+        var gone = function (why) {
+            var el = $('share-side');
+            if (el) { el.innerHTML = fallbackHtml || (why ? '<div class="pair-state">' + esc(why) + '</div>' : ''); }
+        };
+        runScript('pair-start info', function (ok, out) {
+            var d = parse(out);
+            if (share !== mine) {
+                // Closed before the page was up
+                if (d && d.code) { runScript('pair-stop info', function () {}); }
+                return;
+            }
+            if (!d || !d.code) { share = null; gone(''); return; }
+            mine.url = 'http://' + ((d.ips && d.ips[0]) || ip()) + ':' + d.port;
+            drawShare(mine, d);
+            mine.timer = setInterval(function () {
+                runScript('pair-status', function (ok2, out2) {
+                    if (share !== mine) { return; }
+                    var d2 = parse(out2);
+                    if (!d2 || d2.state !== 'waiting') {
+                        clearInterval(mine.timer);
+                        share = null;
+                        gone(T('The page for your phone closed.  Open this screen again to start it.'));
+                        return;
+                    }
+                    drawShare(mine, d2);
+                });
+            }, 4000);
+        });
+    }
+    function drawShare(sh, d) {
+        var el = $('share-side');
+        if (!el || sh.code === d.code) { return; }
+        sh.code = d.code;
+        el.innerHTML = qrSvg(sh.url + '/#c=' + d.code.replace('-', '') + (sh.section ? '&s=' + sh.section : ''))
+            + '<div class="pair-label">' + esc(T('Copy it on your phone')) + '</div>'
+            + '<div class="share-hint">' + esc(T('Scan the code, or open this on a computer and type the code:')) + '</div>'
+            + '<div class="share-url">' + esc(sh.url) + '</div>'
+            + '<div class="share-code">' + esc(d.code) + '</div>';
+    }
     function confirmThen(title, html, fn) {
         onConfirm = fn;
         overlay('confirm', title, html, T('Press OK to go ahead, or BACK to cancel.'));
@@ -334,7 +395,9 @@
         var stateText = st === 'paired'
             ? (pair.purpose === 'password' ? T('Connected.  Type the password on the other device.') : T('Connected.  Choose a key on the other device.'))
             : T('Waiting for a phone or computer…') + (d.triesLeft < 5 ? '  ' + T('{n} tries left for this code.', { n: d.triesLeft }) : '');
-        var html = '<div class="pair">' + qrSvg(pair.url)
+        // The code rides along in the QR code, so scanning connects straight away
+        var qrUrl = st === 'waiting' && d.code ? pair.url + '/#c=' + d.code.replace('-', '') : pair.url;
+        var html = '<div class="pair">' + qrSvg(qrUrl)
             + '<div class="pair-side">'
             + '<div class="pair-label">' + esc(T('Scan, or open on your computer')) + '</div>'
             + '<div class="pair-url">' + esc(pair.url) + '</div>'
@@ -343,7 +406,7 @@
             + '<div class="pair-state">' + esc(stateText) + '</div>'
             + '</div></div>';
         var hint = T('Closes in {time}.  Press BACK to stop.', { time: left(d.expires - new Date().getTime()) });
-        if (pair.stage === st && $('overlay-body').innerHTML) {
+        if (pair.stage === st && pair.qr === qrUrl && $('overlay-body').innerHTML) {
             // Only the parts that change, so the QR code doesn't flicker
             var codeEl = document.querySelector('.pair-code'), stEl = document.querySelector('.pair-state');
             if (codeEl && stEl) {
@@ -354,6 +417,7 @@
             }
         }
         pair.stage = st;
+        pair.qr = qrUrl;
         overlay('pair', pairTitle(), html, hint);
     }
 
@@ -808,8 +872,8 @@
                 runScript('hostkeys --json', function (ok, out) {
                     var k = parse(out) || [];
                     if (!k.length) { message(T('This TV\'s SSH keys'), p(esc(T('There are no keys yet.  They\'re made at the first login.')))); return; }
-                    message(T('This TV\'s SSH keys'), p(esc(T('The first time a computer connects, it shows one of these.  It should match:')))
-                        + '<div class="fp">' + esc(k.map(function (x) { return x.type + ' ' + x.fp; }).join('\n')) + '</div>');
+                    messageShared(T('This TV\'s SSH keys'), p(esc(T('The first time a computer connects, it shows one of these.  It should match:')))
+                        + '<div class="fp">' + esc(k.map(function (x) { return x.type + ' ' + x.fp; }).join('\n')) + '</div>', 'tv');
                 });
             } },
             { label: T('Make new keys'), hint: T('if they\'re broken or were copied'), fn: function () {
@@ -835,9 +899,21 @@
             message(T('File transfer (SFTP)'), p(esc(T('The Homebrew Channel\'s file transfer helper is missing.  Reinstall the Homebrew Channel to get it back.'))));
             return;
         }
-        message(T('File transfer (SFTP)'), p(esc(T('Works.  In WinSCP, FileZilla or Cyberduck, choose SFTP and log in like SSH:')))
-            + pre(T('Host: {host}\nPort: {port}\nUser: root', { host: ip(), port: s.port || 22 }))
-            + p(esc(T('Your files are in /home/root, USB drives under /tmp/usb.'))));
+        // How this TV logs in, so the file transfer app gets the right thing
+        var ent = !s.listening && isEntware(s);
+        var withKey = s.keys > 0 && (s.keysOnly || ent || s.password === 'none');
+        var how;
+        if (withKey) { how = T('Log in with your SSH key, the same one as for SSH.'); }
+        else if (!ent && s.password === 'alpine') { how = T('Log in with the password alpine.') + (s.keys ? '  ' + T('Your key works too.') : ''); }
+        else if (!ent && s.password === 'set') { how = T('Log in with your own password.') + (s.keys ? '  ' + T('Your key works too.') : ''); }
+        else { how = T('Log in with your SSH key, the same one as for SSH.'); }
+        var keyHelp = withKey || s.keys
+            ? p(esc(T('Where the key goes: WinSCP, Advanced, SSH, Authentication, Private key file.  FileZilla, Settings, SFTP, Add key file.  Cyberduck, SSH Private Key.  WinSCP and FileZilla convert an OpenSSH key for you.')))
+            : '';
+        messageShared(T('File transfer (SFTP)'), p(esc(T('Works.  In WinSCP, FileZilla or Cyberduck, choose SFTP and log in like SSH:')))
+            + pre(T('Host: {host}\nPort: {port}\nUser: root', { host: ip(), port: loginPort(s) }))
+            + p(esc(how)) + keyHelp
+            + p(esc(T('Your files are in /home/root, USB drives under /tmp/usb.'))), 'files');
     }
 
     function serversInfo() {
@@ -863,8 +939,11 @@
     function reportShow() {
         runScript('report', function (ok, out) {
             var r = (out || '').trim();
-            message(T('Report for getting help'), '<div class="pair">' + qrSvg(r) + '<div class="pair-side">'
-                + p(esc(T('Scan this with your phone to copy the report, then paste it in a GitHub issue or a forum post.  It has no addresses, keys or names in it.'))) + '</div></div>');
+            messageShared(T('Report for getting help'),
+                p(esc(T('Scan the code to copy the report on your phone or computer, then paste it in a GitHub issue or a forum post.  It has no addresses, keys or names in it.')))
+                + '<pre class="report">' + esc(r) + '</pre>', 'report',
+                // No page (no Node.js): the report itself as a QR code
+                qrSvg(r));
         });
     }
 
@@ -890,7 +969,7 @@
         // The fingerprints are the Homebrew Channel's dropbear's, not Entware's
         var hk = ent ? null : (s.hostKeys || []).filter(function (k) { return k.type === 'ssh-ed25519'; })[0] || (s.hostKeys || [])[0];
         if (hk) { h += '<div class="fp">' + esc(hk.type + ' ' + hk.fp) + '</div>'; }
-        message(T('How to log in'), h);
+        messageShared(T('How to log in'), h, '');
     }
 
     var actions = {
@@ -944,6 +1023,7 @@
     }
     function exitApp() {
         if (pair) { endPair(); }
+        shareStop();
         if (window.PalmSystem && window.PalmSystem.platformBack) { window.PalmSystem.platformBack(); }
         else { window.close(); }
     }
@@ -1001,7 +1081,7 @@
 
     document.addEventListener('webOSRelaunch', function () { if (!busy && !pair) { refresh(); } });
     document.addEventListener('visibilitychange', function () {
-        if (document.hidden && pair) { endPair(); closeOverlay(); }
+        if (document.hidden && (pair || share)) { if (pair) { endPair(); } closeOverlay(); }
         else if (!document.hidden && !busy && !pair) { refresh(); }
     });
     window.addEventListener('unload', function () { if (pair) { endPair(); } });

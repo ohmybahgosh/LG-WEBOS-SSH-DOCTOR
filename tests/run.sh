@@ -844,7 +844,33 @@ test_sessions_kept() {
     check "found as not running" finding ssh-not-running
 }
 
-for c in sessions_kept boot_fix kit exposure entware_openssh_in_use entware_openssh_root_password entware_openssh_broken entware_port_clash entware_dropbear \
+test_pairing_info() {
+    flag_on; sshd_up; cat "$T/k_ed.pub" > "$(AK)"; chmod 600 "$(AK)"; host_key
+    run pair-start info
+    check "started" has '"state":"waiting"'
+    _port=$(printf '%s' "$OUT" | python3 -c 'import json,sys; print(json.load(sys.stdin)["port"])')
+    _code=$(printf '%s' "$OUT" | python3 -c 'import json,sys; print(json.load(sys.stdin)["code"])')
+    _u="http://127.0.0.1:$_port"
+    _t1=$(curl -s -X POST -d "{\"code\":\"$_code\"}" "$_u/api/code" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("token",""))')
+    _t2=$(curl -s -X POST -d "{\"code\":\"$_code\"}" "$_u/api/code" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("token",""))')
+    check "the code works for a phone" test -n "$_t1"
+    check "and for a computer too" test -n "$_t2"
+    run pair-status
+    check "the code stays on the TV" has "\"code\":\"$_code\""
+    _r=$(curl -s "$_u/api/status?token=$_t2")
+    check "report, keys and fingerprints" sh -c "printf '%s' '$_r' | python3 -c \"import json,sys; i=json.load(sys.stdin)['info']; assert i['purpose']=='info' and 'SSH Doctor' in i['report'] and '\\\\n' in i['report'] and len(i['keys'])==1 and i['hostKeys'] and i['sftp'] is False, i\""
+    check "no addresses in the report" sh -c "! printf '%s' '$_r' | python3 -c \"import json,sys; print(json.load(sys.stdin)['info']['report'])\" | grep -Eq '([0-9]{1,3}\.){3}[0-9]{1,3}'"
+    _r=$(curl -s -X POST -d "{\"token\":\"$_t1\",\"key\":\"$(cat "$T/k_rsa.pub")\"}" "$_u/api/key")
+    check "read only: no keys added" sh -c "printf '%s' '$_r' | grep -q wrong-purpose"
+    check "keys file untouched" is "$(grep -c . "$(AK)")" 1
+    run pair-stop key
+    check "stopping a key page leaves it" has '"other"'
+    check "still up" sh -c "curl -s -m 2 '$_u/' | grep -q code"
+    run pair-stop info
+    check "stopped" has stopped
+}
+
+for c in pairing_info sessions_kept boot_fix kit exposure entware_openssh_in_use entware_openssh_root_password entware_openssh_broken entware_port_clash entware_dropbear \
     healthy ssh_off_then_on flag_but_not_running running_but_off_next_boot locked_out_then_password \
     no_keys_no_password messy_key_file loose_home add_key restore legacy_dropbear host_fingerprints \
     failsafe_and_telnet pairing pairing_wrong_codes pairing_screen_closed servers port_taken port_change \

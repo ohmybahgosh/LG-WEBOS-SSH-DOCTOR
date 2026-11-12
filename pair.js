@@ -3,7 +3,9 @@
  * makes is an ed25519 pair made here with tweetnacl and this browser's random
  * numbers: the private key is saved as a file on this device and never sent.
  * A password is turned into a SHA-512 crypt hash here, and only the hash is
- * sent.
+ * sent.  Opened from How to log in, the report or the TV's keys, it's a
+ * read-only page with everything ready to copy.  The QR code on the TV puts
+ * the code after # in the address, so scanning it connects straight away.
  */
 (function () {
     'use strict';
@@ -26,8 +28,7 @@
 
     function $(id) { return document.getElementById(id); }
     function show(id) {
-        ['step-code', 'step-key', 'step-password', 'step-confirm', 'step-done', 'step-end'].forEach(function (s) { $(s).className = s === id ? (s === 'step-key' ? '' : 'card') : 'hidden'; });
-        if (id === 'step-key') { $(id).className = ''; }
+        ['step-code', 'step-key', 'step-password', 'step-confirm', 'step-done', 'step-info', 'step-end'].forEach(function (s) { $(s).className = s === id ? (s === 'step-key' || s === 'step-info' ? '' : 'card') : 'hidden'; });
     }
     function text(id, t, cls) { var e = $(id); e.textContent = t; if (cls) { e.className = cls; } }
 
@@ -95,7 +96,7 @@
             if (r.ok && r.token) {
                 token = r.token;
                 if (r.info) { info = r.info; }
-                if (info.purpose === 'password') { show('step-password'); $('pw1').focus(); } else { show('step-key'); }
+                if (info.purpose === 'info') { doneInfo(); } else if (info.purpose === 'password') { show('step-password'); $('pw1').focus(); } else { show('step-key'); }
                 return;
             }
             if (r.error === 'new-code') { codeEl.value = ''; }
@@ -225,8 +226,15 @@
     function p(x) { return '<p>' + esc(x) + '</p>'; }
     var legacyOpts = function () { return info.legacyRsa ? '-o HostKeyAlgorithms=+ssh-rsa -o PubkeyAcceptedAlgorithms=+ssh-rsa ' : ''; };
 
+    // Logs in with a password rather than a key: after setting one, or on the
+    // read-only page when the TV has no key yet
+    function usesPassword() {
+        if (info.purpose === 'password') { return true; }
+        return info.purpose === 'info' && !(info.keys && info.keys.length);
+    }
+
     function howto(os) {
-        var host = HOST, f = made ? made.file : '', port = info.port || 22, pw = info.purpose === 'password';
+        var host = HOST, f = made ? made.file : '', port = info.port || 22, pw = usesPassword();
         var cmd = 'ssh ' + legacyOpts() + portOpt();
         var h = '';
         if (os === 'unix') {
@@ -263,8 +271,13 @@
         } else {
             h += p(T('In an SSH app like Termius, add a host: {host}, port {port}, user root.', { host: host, port: port }));
             if (made) { h += p(T('Import {file} from your downloads as its key.', { file: f })); }
+            h += '<a class="btn" href="ssh://root@' + esc(host) + (port !== 22 ? ':' + port : '') + '">' + esc(T('Open in an SSH app')) + '</a>';
+        }
+        if (info.purpose === 'info' && info.password === 'alpine' && !(info.keys && info.keys.length)) {
+            h += p(T('The password is alpine.  Set up a key on the TV to turn that off.'));
         }
         $('howto').innerHTML = h;
+        addCopies($('howto'));
         var b = $('tabs').getElementsByTagName('button');
         for (var i = 0; i < b.length; i++) { b[i].className = b[i].getAttribute('data-os') === os ? 'on' : ''; }
     }
@@ -279,6 +292,82 @@
     function knownHosts() {
         var name = info.port && info.port !== 22 ? '[' + HOST + ']:' + info.port : HOST;
         return (info.hostKeys || []).map(function (k) { return name + ' ' + k.line; }).join('\n');
+    }
+
+    // ------------------------------------------------------------ copying
+
+    // A Copy button above each block of text.  The page is plain http, where
+    // browsers don't offer the clipboard API, so a selected text area and
+    // execCommand do it there.
+    function copyText(t, btn) {
+        var ok = false;
+        var ta = document.createElement('textarea');
+        ta.value = t;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed'; ta.style.top = '0'; ta.style.left = '0'; ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.focus(); ta.select();
+        try { ta.setSelectionRange(0, t.length); } catch (e) { /* older browsers */ }
+        try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+        document.body.removeChild(ta);
+        if (!ok && navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(t).then(function () { mark(btn, true); }, function () { mark(btn, false); });
+            return;
+        }
+        mark(btn, ok);
+    }
+    function mark(btn, ok) {
+        btn.textContent = ok ? T('Copied') : T('Select and copy it by hand');
+        btn.className = 'copy' + (ok ? ' done' : '');
+        setTimeout(function () { btn.textContent = T('Copy'); btn.className = 'copy'; }, 2500);
+    }
+    function addCopies(root) {
+        var pres = root.getElementsByTagName('pre');
+        for (var i = 0; i < pres.length; i++) {
+            (function (pr) {
+                if (pr.getAttribute('data-copy') || !pr.textContent) { return; }
+                pr.setAttribute('data-copy', '1');
+                var b = document.createElement('button');
+                b.className = 'copy';
+                b.type = 'button';
+                b.textContent = T('Copy');
+                b.addEventListener('click', function () { copyText(pr.textContent, b); });
+                var w = document.createElement('div');
+                w.className = 'cp';
+                pr.parentNode.insertBefore(w, pr);
+                w.appendChild(b);
+                w.appendChild(pr);
+            }(pres[i]));
+        }
+    }
+
+    // ------------------------------------------------------------ read-only page
+
+    function doneInfo() {
+        done();
+        document.title = T('Your LG TV, ready to copy');
+        text('page-title', T('Your LG TV'));
+        text('done-title', T('Your TV'));
+        $('done-title').className = '';
+        text('done-intro', T('Log in like this.  Everything on this page is ready to copy.'));
+        text('alpine-note', '');
+        $('step-info').className = '';
+        var name = info.port && info.port !== 22 ? '[' + HOST + ']:' + info.port : HOST;
+        var fps = (info.hostKeys || []).map(function (k) { return k.type + ' ' + k.fp; }).join('\n');
+        $('info-tv').style.display = fps ? '' : 'none';
+        $('info-fps').textContent = fps;
+        $('info-forget').textContent = 'ssh-keygen -R ' + name;
+        var keys = info.keys || [];
+        $('info-keylist').innerHTML = keys.length ? '<table class="keys">' + keys.map(function (k) {
+            return '<tr><td>' + esc(k.comment || T('(no name)')) + '<br><span class="dim">' + esc(k.type.replace('ssh-', '')) + '</span></td><td class="fp">' + esc(k.fp) + '</td></tr>';
+        }).join('') + '</table>' : '<p class="dim">' + esc(T('No key can log in yet.  Use Set up a key on the TV to add one.')) + '</p>';
+        $('info-report').style.display = info.report ? '' : 'none';
+        $('info-report-text').textContent = info.report || '';
+        addCopies($('step-info'));
+        addCopies($('config-box'));
+        if (START.s === 'files') { howto('files'); }
+        var go = { report: 'info-report', keys: 'info-keys', tv: 'info-tv', files: 'step-done' }[START.s];
+        if (go && $(go).scrollIntoView) { setTimeout(function () { $(go).scrollIntoView(); }, 50); }
     }
 
     function done() {
@@ -303,11 +392,30 @@
         var ua = navigator.userAgent;
         var os = /Windows/.test(ua) ? 'win' : /Android|iPhone|iPad/.test(ua) ? 'phone' : 'unix';
         howto(os);
-        $('tabs').addEventListener('click', function (e) {
-            var os2 = e.target.getAttribute && e.target.getAttribute('data-os');
-            if (os2) { howto(os2); }
-        });
+        if (!tabsWired) {
+            tabsWired = true;
+            $('tabs').addEventListener('click', function (e) {
+                var os2 = e.target.getAttribute && e.target.getAttribute('data-os');
+                if (os2) { howto(os2); }
+            });
+        }
+        addCopies($('config-box'));
     }
+    var tabsWired = false;
 
-    codeEl.focus();
+    // The QR code on the TV: #c=CODE (and s=section), so scanning connects
+    // straight away.  The code leaves the address bar right after.
+    var START = {};
+    String(location.hash || '').replace(/^#/, '').split('&').forEach(function (kv) {
+        var i = kv.indexOf('=');
+        if (i > 0) { START[kv.slice(0, i)] = decodeURIComponent(kv.slice(i + 1)); }
+    });
+    if (location.hash && window.history && history.replaceState) { history.replaceState(null, '', location.pathname); }
+    if (START.c && /^[A-Za-z0-9-]{6,7}$/.test(START.c)) {
+        var c0 = START.c.toUpperCase().replace(/[^A-Z0-9]/g, '');
+        codeEl.value = c0.slice(0, 3) + '-' + c0.slice(3);
+        sendCode();
+    } else {
+        codeEl.focus();
+    }
 }());

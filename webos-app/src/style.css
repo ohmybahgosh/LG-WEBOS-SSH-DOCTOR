@@ -2,7 +2,7 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; }
 body {
-  background: radial-gradient(1200px 700px at 75% 40%, rgba(34, 229, 132, .12), transparent),
+  background: radial-gradient(1200px 700px at 75% 40%, rgba(45, 212, 191, .12), transparent),
               linear-gradient(135deg, #0e1513, #0a0d0c);
   color: #e8efeb;
   font-family: "LG Smart UI", "Museo Sans", Inter, "Segoe UI", Helvetica, Arial, sans-serif;
@@ -25,7 +25,7 @@ main { display: flex; margin-top: 48px; }
 .hero { display: flex; align-items: center; }
 .hero b { font-size: 44px; }
 .dot { width: 30px; height: 30px; border-radius: 50%; margin-right: 26px; flex: none; }
-.dot-ok { background: #22e584; box-shadow: 0 0 30px #22e584; }
+.dot-ok { background: #2dd4bf; box-shadow: 0 0 30px #2dd4bf; }
 .dot-warn { background: #febc2e; box-shadow: 0 0 30px #febc2e; }
 .dot-bad { background: #ff5f57; box-shadow: 0 0 30px #ff5f57; }
 .dot-wait { background: #6f7f78; }
@@ -34,12 +34,12 @@ main { display: flex; margin-top: 48px; }
 table { width: 100%; border-collapse: collapse; font-size: 25px; }
 td { padding: 12px 0; border-top: 1px solid rgba(255, 255, 255, .06); vertical-align: top; }
 td:first-child { color: #6f7f78; width: 34%; }
-.ok { color: #22e584; }
+.ok { color: #2dd4bf; }
 .warn { color: #febc2e; }
 .bad { color: #ff5f57; }
 .card.compact td { padding: 7px 0; }
 
-#findings { list-style: none; padding: 0; margin: 20px 0 0; font-size: 22px; }
+#findings { list-style: none; padding: 0; margin: 20px 0 0; font-size: 24px; }
 #findings li { padding: 0 0 0 30px; margin: 6px 0 12px; position: relative; color: #c9d4cf; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
 #findings li:before { content: "!"; position: absolute; left: 6px; top: 0; color: #ff5f57; font-weight: 800; }
 #findings li.tip { color: #93a39b; }
@@ -50,15 +50,15 @@ td:first-child { color: #6f7f78; width: 34%; }
   font-size: 30px; font-weight: 600; padding: 19px 32px; border-radius: 20px;
   background: #16201c; margin-bottom: 14px; border: 3px solid transparent; outline: none;
 }
-.btn small { display: block; font-size: 20px; color: #6f7f78; font-weight: 500; margin-top: 4px; }
-.btn:focus, .btn.focus { border-color: #22e584; background: #183026; box-shadow: 0 0 0 6px rgba(34, 229, 132, .15); }
-.btn.fix { background: #13261d; box-shadow: inset 0 0 0 2px rgba(34, 229, 132, .35); color: #22e584; }
+.btn small { display: block; font-size: 22px; color: #6f7f78; font-weight: 500; margin-top: 4px; }
+.btn:focus, .btn.focus { border-color: #2dd4bf; background: #132f2c; box-shadow: 0 0 0 6px rgba(45, 212, 191, .15); }
+.btn.fix { background: #112725; box-shadow: inset 0 0 0 2px rgba(45, 212, 191, .35); color: #2dd4bf; }
 .actions.tight .btn { padding-top: 12px; padding-bottom: 12px; margin-bottom: 10px; font-size: 28px; }
-.actions.tight .btn small { font-size: 18px; margin-top: 2px; }
+.actions.tight .btn small { font-size: 21px; margin-top: 2px; }
 .actions.tighter .btn { padding-top: 8px; padding-bottom: 8px; margin-bottom: 8px; font-size: 27px; }
-.actions.tighter .btn small { font-size: 17px; margin-top: 0; }
+.actions.tighter .btn small { font-size: 20px; margin-top: 0; }
 /* With several findings they get shorter, so the card keeps its size */
-.card.compact #findings li { -webkit-line-clamp: 2; font-size: 21px; margin-bottom: 8px; }
+.card.compact #findings li { -webkit-line-clamp: 2; font-size: 22px; margin-bottom: 8px; }
 
 footer { position: absolute; bottom: 56px; left: 110px; right: 110px; display: flex; color: #6f7f78; font-size: 22px; }
 footer > span { margin-right: 40px; }
@@ -69,11 +69,11 @@ footer .right { margin: 0 0 0 auto; }
 .hidden { display: none; }
 .panel { width: 1240px; background: #111a17; border: 1px solid rgba(255, 255, 255, .1); border-radius: 28px; padding: 48px 56px; }
 .panel-title { font-size: 38px; font-weight: 800; margin-bottom: 20px; }
-.panel-body { font-size: 25px; color: #c9d4cf; line-height: 1.45; }
+.panel-body { font-size: 27px; color: #c9d4cf; line-height: 1.45; }
 .panel-body p { margin: 0 0 14px; }
-.panel-body pre { white-space: pre-wrap; word-break: break-all; font-size: 22px; color: #e8efeb; background: #0b110f; border-radius: 12px; padding: 12px 18px; margin: 6px 0 16px; }
+.panel-body pre { white-space: pre-wrap; word-break: break-all; font-size: 24px; color: #e8efeb; background: #0b110f; border-radius: 12px; padding: 12px 18px; margin: 6px 0 16px; }
 .panel-hint { margin-top: 28px; color: #6f7f78; font-size: 22px; }
-.spinner { width: 54px; height: 54px; border: 6px solid #2b3632; border-top-color: #22e584; border-radius: 50%; animation: spin 1s linear infinite; display: inline-block; vertical-align: middle; margin-right: 24px; }
+.spinner { width: 54px; height: 54px; border: 6px solid #2b3632; border-top-color: #2dd4bf; border-radius: 50%; animation: spin 1s linear infinite; display: inline-block; vertical-align: middle; margin-right: 24px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* Pairing: QR code on the left, the code to type on the right */
@@ -81,24 +81,34 @@ footer .right { margin: 0 0 0 auto; }
 .pair svg { width: 440px; height: 440px; background: #fff; border-radius: 18px; margin-right: 52px; flex: none; }
 .pair-side { flex: 1; }
 .pair-label { font-size: 22px; color: #6f7f78; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; }
-.pair-code { font-family: "DejaVu Sans Mono", "Liberation Mono", Menlo, Consolas, monospace; font-size: 110px; font-weight: 800; letter-spacing: 10px; color: #22e584; margin: 4px 0 22px; }
+.pair-code { font-family: "DejaVu Sans Mono", "Liberation Mono", Menlo, Consolas, monospace; font-size: 110px; font-weight: 800; letter-spacing: 10px; color: #2dd4bf; margin: 4px 0 22px; }
 .pair-url { font-family: "DejaVu Sans Mono", "Liberation Mono", Menlo, Consolas, monospace; font-size: 34px; color: #e8efeb; margin: 4px 0 22px; word-break: break-all; }
 .pair-state { font-size: 25px; color: #93a39b; }
 .fp { font-family: "DejaVu Sans Mono", "Liberation Mono", Menlo, Consolas, monospace; font-size: 26px; color: #e8efeb; word-break: break-all; background: #0b110f; border-radius: 12px; padding: 14px 18px; margin: 10px 0 18px; }
-.keys { width: 100%; font-size: 21px; }
+.keys { width: 100%; font-size: 25px; }
 .keys td { padding: 10px 14px 10px 0; }
 .keys td:first-child { width: 20%; }
 
 /* Menus and text boxes in the overlay */
 .menu { margin-top: 6px; }
 .mrow { display: flex; align-items: baseline; justify-content: space-between; font-size: 28px; font-weight: 600; color: #e8efeb; padding: 16px 28px; border-radius: 18px; background: #16201c; margin-bottom: 10px; border: 3px solid transparent; }
-.mrow small { font-size: 21px; color: #6f7f78; font-weight: 500; margin-left: 30px; text-align: right; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mrow.focus { border-color: #22e584; background: #183026; }
-.mrow.fix { color: #22e584; }
+.mrow small { font-size: 23px; color: #6f7f78; font-weight: 500; margin-left: 30px; text-align: right; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mrow.focus { border-color: #2dd4bf; background: #132f2c; }
+.mrow.fix { color: #2dd4bf; }
 /* Long menus (More tools with Undo a change): tighter rows so they fit the screen */
 .menu.many .mrow { padding: 10px 28px; margin-bottom: 7px; font-size: 26px; }
-.menu.many .mrow small { font-size: 20px; }
-.in-label { display: block; font-size: 22px; color: #93a39b; margin: 14px 0 6px; }
+.menu.many .mrow small { font-size: 22px; }
+.in-label { display: block; font-size: 24px; color: #93a39b; margin: 14px 0 6px; }
 .in { width: 100%; font-size: 32px; padding: 14px 18px; border-radius: 14px; border: 3px solid #2b3632; background: #0b110f; color: #e8efeb; outline: none; font-family: "DejaVu Sans Mono", "Liberation Mono", Menlo, Consolas, monospace; }
-.in:focus { border-color: #22e584; }
-.keys small { color: #6f7f78; font-size: 17px; word-break: break-all; }
+.in:focus { border-color: #2dd4bf; }
+.keys small { color: #93a39b; font-size: 22px; word-break: break-all; }
+/* Messages with a QR code beside them, for copying on a phone or computer */
+.share { display: flex; align-items: flex-start; }
+.share-main { flex: 1; min-width: 0; }
+.share-side { width: 340px; flex: none; margin-left: 44px; text-align: center; }
+.share-side svg { width: 340px; height: 340px; background: #fff; border-radius: 16px; display: block; margin-bottom: 14px; }
+.share-side .pair-label { font-size: 22px; }
+.share-hint { font-size: 22px; color: #93a39b; margin: 6px 0 8px; line-height: 1.35; }
+.share-url { font-family: "DejaVu Sans Mono", "Liberation Mono", Menlo, Consolas, monospace; font-size: 21px; color: #e8efeb; word-break: break-all; }
+.share-code { font-family: "DejaVu Sans Mono", "Liberation Mono", Menlo, Consolas, monospace; font-size: 44px; font-weight: 800; letter-spacing: 5px; color: #2dd4bf; margin-top: 6px; }
+.panel-body pre.report { font-size: 21px; line-height: 1.35; max-height: 460px; overflow: hidden; }
