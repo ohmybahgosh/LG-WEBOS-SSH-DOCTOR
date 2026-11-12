@@ -26,6 +26,7 @@ So you can judge it yourself:
 
 - **Fix SSH at startup,** when you turn it on, starts the Homebrew Channel's `dropbear` after a restart if it didn't come up, and fixes the keys file's permissions.  It writes what it did to `/var/lib/webosbrew/ssh-doctor/boot.last`.
 - **Reachable from the internet?** talks to your router on your home network only: an SSDP search, then UPnP requests for its list of port forwards.  **Close it on the router** asks the router to remove the forwards that lead to the TV's SSH or telnet ports, and nothing else.
+- **Updates** ask GitHub (github.com and api.github.com) for this repository's latest release: its Homebrew Channel manifest and release notes.  Only an IPK from this repository's own release downloads is installed, and through the Homebrew Channel, which checks it against the SHA-256 in that manifest before installing.  Nothing installs unless you press OK.
 - **Save or restore my setup** writes to a USB drive you plugged in (`/tmp/usb`): your keys file, the TV's own SSH host keys (private keys), your settings and your password's hash.  Anyone with that drive could pretend to be your TV to computers that trust it, so keep it safe.  Putting it back keeps a backup of everything it replaces, and a different port is tried like a port change.
 
 It downloads nothing, opens no ports except the pairing page while it's on screen, and sends nothing outside your home network.

@@ -870,7 +870,73 @@ test_pairing_info() {
     check "stopped" has stopped
 }
 
-for c in pairing_info sessions_kept boot_fix kit exposure entware_openssh_in_use entware_openssh_root_password entware_openssh_broken entware_port_clash entware_dropbear \
+REL_PID=''
+release_start() {
+    rm -f "$T/rel.ready"
+    node "$HERE/fakebin/fake-release.js" "$1" "$T/rel.ready" > /dev/null 2>&1 &
+    REL_PID=$!
+    _i=0; while [ ! -s "$T/rel.ready" ] && [ $_i -lt 50 ]; do sleep 0.1; _i=$((_i + 1)); done
+    SD_RELEASE_BASE="http://127.0.0.1:$(cat "$T/rel.ready")/rel"
+    SD_API_BASE="http://127.0.0.1:$(cat "$T/rel.ready")/api"
+    export SD_RELEASE_BASE SD_API_BASE SD_LUNA="$HERE/fakebin/luna-send" FAKE_LUNA_LOG="$T/luna.log"
+}
+release_stop() { [ -n "$REL_PID" ] && kill "$REL_PID" 2>/dev/null; REL_PID=''; unset SD_RELEASE_BASE SD_API_BASE SD_LUNA FAKE_LUNA_LOG FAKE_LUNA_FAIL; }
+upd_wait() { _i=0; while [ $_i -lt 50 ]; do grep -q "\"state\":\"$1\"" "$SD_ROOT/tmp/ssh-doctor/update/state.json" 2>/dev/null && return 0; sleep 0.2; _i=$((_i + 1)); done; return 1; }
+
+test_update() {
+    flag_on; sshd_up; cat "$T/k_ed.pub" > "$(AK)"; chmod 600 "$(AK)"
+    release_start 9.9.9
+    run update-check
+    check "newer found" has '"newer":true'
+    check "its notes" has 'Something new'
+    json
+    check "shown on the main screen" finding update-available
+    check "in the status" sh -c "python3 -c \"import json; d=json.load(open('$T/s.json')); assert d['update']['latest']=='9.9.9'\""
+    run update-install
+    check "started" has '"state":"starting"'
+    check "installed" upd_wait "done"
+    check "through the Homebrew Channel, with the hash" grep -q "hbchannel.service/install.*sd_9.9.9.ipk.*\"ipkHash\":\"abab" "$T/luna.log"
+    _i=0; while [ $_i -lt 30 ] && ! grep -q applicationManager "$T/luna.log"; do sleep 0.2; _i=$((_i + 1)); done
+    check "then the app opens again with what's new" grep -q 'applicationManager/launch.*"updated":"9.9.9"' "$T/luna.log"
+    json
+    check "no update left to offer" nofinding update-available
+    # A download that doesn't match its hash
+    run update-check
+    export FAKE_LUNA_FAIL=1
+    run update-install
+    check "failure noticed" upd_wait failed
+    check "with the reason" grep -q "Invalid file checksum" "$SD_ROOT/tmp/ssh-doctor/update/state.json"
+    release_stop
+    # Nothing newer: nothing to install
+    release_start "$(sed -n 's/^VERSION="\(.*\)"$/\1/p' "$ROOT/ssh-doctor.sh")"
+    run update-check
+    check "same version: not newer" has '"newer":false'
+    run update-install
+    check "install refused" is "$RC" 1
+    release_stop
+    run changes 0.4.0
+    check "what changed in a version" has "Fix SSH at startup"
+}
+
+test_main_address() {
+    mkdir -p "$T/bin"; cp "$HERE/fakebin/ip" "$T/bin/ip"
+    # Wired eth0 is the main connection, Wi-Fi a backup with a higher metric
+    # shellcheck disable=SC2086
+    _ip_json() { env -u SD_IPS PATH="$T/bin:$PATH" FAKE_ROUTES="$1" FAKE_ADDRS="$2" $SH "$ROOT/ssh-doctor.sh" status --json > "$T/s.json" 2>&1; }
+    _ip_json 'default via 192.168.50.1 dev wlan0 metric 600\ndefault via 192.168.50.1 dev eth0 metric 100' \
+        '1: lo    inet 127.0.0.1/8 scope host lo\n3: wlan0    inet 192.168.50.97/24 scope global wlan0\n4: eth0    inet 192.168.50.96/24 scope global eth0'
+    check "eth0 first" is "$(field ips)" '["192.168.50.96", "192.168.50.97"]'
+    _ip_json 'default via 192.168.50.1 dev wlan0' \
+        '3: eth0    inet 10.0.0.5/24 scope global eth0\n4: wlan0    inet 192.168.50.97/24 scope global wlan0'
+    check "Wi-Fi first when it has the route" is "$(field ips)" '["192.168.50.97", "10.0.0.5"]'
+    # Seen on a real TV: the adapter got no DHCP answer, so eth0 has a 169.254
+    # address and a default route with no gateway
+    _ip_json 'default dev eth0 scope link' \
+        '3: wlan0    inet 192.168.50.97/24 scope global wlan0\n8: eth0    inet 169.254.240.141/16 scope global eth0'
+    check "no link-local address, Wi-Fi it is" is "$(field ips)" '["192.168.50.97"]'
+}
+
+for c in update main_address pairing_info sessions_kept boot_fix kit exposure entware_openssh_in_use entware_openssh_root_password entware_openssh_broken entware_port_clash entware_dropbear \
     healthy ssh_off_then_on flag_but_not_running running_but_off_next_boot locked_out_then_password \
     no_keys_no_password messy_key_file loose_home add_key restore legacy_dropbear host_fingerprints \
     failsafe_and_telnet pairing pairing_wrong_codes pairing_screen_closed servers port_taken port_change \

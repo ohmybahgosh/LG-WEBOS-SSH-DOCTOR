@@ -35,7 +35,7 @@ async function tv(b) {
     const only = (process.env.SD_UI_ONLY || '').split(':');
     for (const lang of ['en', 'ru', 'es']) {
         if (only[0] && only[0] !== lang) { continue; }
-        for (const s of ['healthy', 'alpine', 'locked', 'off', 'messy', 'custom', 'entware', 'exposed']) {
+        for (const s of ['healthy', 'alpine', 'locked', 'off', 'messy', 'custom', 'entware', 'exposed', 'update']) {
             if (only[1] && only[1] !== s) { continue; }
             const c = await b.newContext({ viewport: { width: 1920, height: 1080 } });
             const p = await c.newPage();
@@ -62,7 +62,7 @@ async function tv(b) {
                         if (pr.top < 0 || pr.bottom > 1080) { out.msgs.push('panel off screen ' + Math.round(pr.top) + '..' + Math.round(pr.bottom)); }
                         // The report stays in English on purpose: it goes in a GitHub issue
                         const pc = document.querySelector('.panel').cloneNode(true);
-                        pc.querySelectorAll('pre.report').forEach((x) => x.remove());
+                        pc.querySelectorAll('pre.report, .notes').forEach((x) => x.remove());
                         out.ov = pc.innerText;
                     }
                     out.app = document.getElementById('app').innerText;

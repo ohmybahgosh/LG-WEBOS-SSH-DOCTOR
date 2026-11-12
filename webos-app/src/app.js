@@ -108,6 +108,7 @@
         'entware-port-clash': 'Entware\'s SSH is set to a port another server already uses (usually the Homebrew Channel\'s, on 22), so it can\'t start.  Give one of them another port.',
         'entware-stopped': 'Entware\'s SSH is installed but not running.  Restart the TV, or over telnet run /opt/etc/init.d/rc.unslung start.',
         'entware-no-autostart': 'Nothing starts Entware when the TV starts, so its SSH won\'t come back after a restart.  The Entware installer adds a startup script for that.',
+        'update-available': 'A newer SSH Doctor is out.  Update to see what\'s new and install it.',
         'boot-started': 'SSH wasn\'t running after the last restart, so SSH Doctor started it.',
         'boot-perms': 'After the last restart, the keys file had loose permissions, so SSH Doctor fixed them.',
         'ssh-exposed': 'Your router forwards this TV\'s SSH port to the internet, so anyone online can try to log in.  Close it on the router takes that forward off.',
@@ -152,6 +153,8 @@
                 backups = (out2 || '').split('\n').filter(function (l) { return /^authorized_keys\.ssh-doctor-/.test(l); });
                 render();
                 exposureBackground();
+                updateBackground();
+                afterUpdate();
                 if (cb) { cb(d); }
             });
         });
@@ -214,6 +217,8 @@
         show('apply', find('settings-not-applied'));
         show('hostfix', find('hostkey-broken'));
         show('exposed', find('ssh-exposed') || find('telnet-exposed'));
+        show('update', find('update-available'));
+        if (s.update && s.update.newer) { $('update-label').textContent = T('Update to v{v}', { v: s.update.latest }); }
         show('password', find('no-way-in') || find('no-password') || find('keys-only-no-keys'));
         $('settings-hint').textContent = settingsHint();
         $('keys-hint').textContent = s.keys === 1 ? T('1 key') : T('{n} keys', { n: s.keys || 0 });
@@ -235,6 +240,8 @@
         $('overlay-body').innerHTML = bodyHtml;
         $('overlay-hint').textContent = hint || '';
         $('overlay').className = 'overlay';
+        // Long menus get a tighter panel so they fit the screen
+        document.querySelector('.panel').className = 'panel' + (/class="menu many more"/.test(bodyHtml) ? ' long' : '');
     }
     function closeOverlay() {
         shareStop();
@@ -499,7 +506,7 @@
         var items = m.items.filter(function (x) { return x; });
         m.items = items;
         if (m.at >= items.length) { m.at = items.length - 1; }
-        overlay('menu', m.title, '<div class="menu' + (items.length > 8 ? ' many' : '') + '">' + items.map(function (x, i) {
+        overlay('menu', m.title, '<div class="menu' + (items.length > 8 ? ' many' : '') + (items.length > 10 ? ' more' : '') + '">' + items.map(function (x, i) {
             return '<div class="mrow' + (x.fix ? ' fix' : '') + (i === m.at ? ' focus' : '') + '" data-i="' + i + '"><span>' + esc(x.label)
                 + '</span><small>' + esc(x.hint || '') + '</small></div>';
         }).join('') + '</div>', T('OK selects, BACK goes back.'));
@@ -745,6 +752,7 @@
             { label: T('SSH servers on this TV'), hint: T('{n} found', { n: (s.servers || []).length }), fn: serversInfo },
             { label: T('Reachable from the internet?'), hint: exposureHint(), fn: exposureInfo, fix: find('ssh-exposed') || find('telnet-exposed') },
             { label: T('Save or restore my setup'), hint: T('on a USB drive, for after a reset'), fn: kitMenu },
+            { label: T('Updates'), hint: s.update && s.update.newer ? T('v{v} is out', { v: s.update.latest }) : T('this is v{v}', { v: s.version }), fn: updateFlow, fix: !!(s.update && s.update.newer) },
             s.entwareInstalled === false ? { label: T('Get more from SSH'), hint: T('Entware: bash, tmux, nano and more'), fn: entwareInfo } : null,
             { label: T('Report for getting help'), hint: T('no private details'), fn: reportShow },
             backups.length ? { label: T('Undo a change'), hint: T('put a backup back'), fn: actions.restore } : null,
@@ -802,6 +810,85 @@
     }
     function closeExposure() {
         act(T('Close it on the router'), 'exposure-close', p(esc(T('The router doesn\'t forward SSH or telnet to this TV any more.'))));
+    }
+
+    // ------------------------------------------------------------------ updates
+    //
+    // Checked once each time the app opens, in the background.  Installing goes
+    // through the Homebrew Channel, which checks the download's SHA-256; that
+    // closes the app, and the script opens it again with {"updated": VERSION}
+    // so it can show what's new.
+
+    var updateAsked = false;
+    function updateBackground() {
+        if (updateAsked) { return; }
+        updateAsked = true;
+        runScript('update-check', function () { if (!busy && !overlayMode) { refresh(); } });
+    }
+
+    // Release notes and the changelog are Markdown: headings, lists, **bold**, `code`
+    function notesHtml(md, max) {
+        var lines = String(md || '').replace(/\r/g, '').split('\n'), out = [], n = 0;
+        for (var i = 0; i < lines.length && n < (max || 8); i++) {
+            var l = lines[i].replace(/\*\*/g, '').replace(/`/g, '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1');
+            if (/^#{2,4}\s+/.test(l)) { out.push('<div class="nh">' + esc(l.replace(/^#+\s+/, '')) + '</div>'); }
+            else if (/^\s*[-*]\s+/.test(l)) { out.push('<div class="ni">' + esc(l.replace(/^\s*[-*]\s+/, '')) + '</div>'); n++; }
+        }
+        return '<div class="notes">' + out.join('') + '</div>';
+    }
+
+    function updateFlow() {
+        if (busy) { return; }
+        busy = true;
+        overlay('busy', T('Updates'), '<span class="spinner"></span>' + esc(T('Checking for a newer version…')), '');
+        runScript('update-check', function (ok, out) {
+            busy = false;
+            var u = parse(out);
+            if (!u || u.error || !u.latest) { message(T('Updates'), p(esc(T('GitHub couldn\'t be reached, so there\'s no answer.  Check the TV\'s internet connection and try again.')))); return; }
+            if (!u.newer) { message(T('Updates'), p(esc(T('You have the newest version, v{v}.', { v: u.current })))); refresh(); return; }
+            confirmThen(T('Update to v{v}', { v: u.latest }),
+                p(esc(T('You have v{old}.  What\'s new in v{v}:', { old: u.current, v: u.latest }))) + notesHtml(u.notes, 7)
+                + p(esc(T('OK installs it through the Homebrew Channel, which checks the download first.  The app closes and opens again by itself.  SSH keeps working the whole time.'))),
+                function () { installUpdate(u.latest); });
+        });
+    }
+
+    function installUpdate(v) {
+        busy = true;
+        overlay('busy', T('Update to v{v}', { v: v }), '<span class="spinner"></span>' + esc(T('Downloading and installing v{v}…  The app closes and opens again by itself.', { v: v })), '');
+        runScript('update-install', function (ok, out) {
+            var st = parse(out);
+            if (!ok || !st || st.error) { busy = false; message(T('Update to v{v}', { v: v }), p(esc(T('The update didn\'t start.  Try again in a moment.')))); return; }
+            var tries = 0;
+            var t = setInterval(function () {
+                runScript('update-status', function (ok2, out2) {
+                    var d = parse(out2) || {};
+                    tries++;
+                    if (d.state === 'failed' || tries > 150) {
+                        clearInterval(t);
+                        busy = false;
+                        message(T('Update to v{v}', { v: v }), p(esc(T('The update didn\'t install.  Nothing changed: this version keeps working.')))
+                            + (d.error ? pre(d.error) : ''));
+                    }
+                });
+            }, 2000);
+        });
+    }
+
+    // Opened again after an update: what's new in this version
+    function launchParams() {
+        var raw = (window.webOSSystem && window.webOSSystem.launchParams) || (window.PalmSystem && window.PalmSystem.launchParams) || '';
+        try { return typeof raw === 'string' ? (raw ? JSON.parse(raw) : {}) : (raw || {}); } catch (e) { return {}; }
+    }
+    var shownUpdate = '';
+    function afterUpdate() {
+        var lp = launchParams();
+        var v = lp && lp.updated;
+        if (!v || v === shownUpdate || overlayMode) { return; }
+        shownUpdate = v;
+        runScript('changes ' + shq(v), function (ok, out) {
+            message(T('Updated to v{v}', { v: v }), p(esc(T('SSH Doctor is up to date.  What\'s new:'))) + notesHtml(out, 8));
+        });
     }
 
     // ------------------------------------------------------------------ Entware
@@ -992,6 +1079,7 @@
         tools: toolsMenu,
         apply: function () { act(T('Put my settings back'), 'apply', p(esc(T('SSH runs with your settings again.')))); },
         exposed: closeExposure,
+        update: updateFlow,
         hostfix: function () { act(T('Repair the TV\'s SSH keys'), 'hostkeys-reset', p(esc(T('Done.  New keys are made at the next login.')))); },
         restore: function () {
             var b = backups[backups.length - 1];

@@ -1,0 +1,17 @@
+#!/bin/sh
+# Stands in for luna-send in the tests: logs each call to $FAKE_LUNA_LOG and
+# answers the Homebrew Channel's install the way it does, with progress and
+# then "finished" (or an error when FAKE_LUNA_FAIL is set).
+printf '%s\n' "$*" >> "${FAKE_LUNA_LOG:-/dev/null}"
+case "$*" in
+    *hbchannel.service/install*)
+        echo '{"returnValue":true,"statusText":"Downloading"}'
+        if [ -n "${FAKE_LUNA_FAIL:-}" ]; then
+            echo '{"returnValue":false,"errorText":"Invalid file checksum"}'
+            exit 0
+        fi
+        echo '{"returnValue":true,"statusText":"Installing"}'
+        echo '{"returnValue":true,"finished":true,"statusText":"Finished"}'
+        ;;
+    *) echo '{"returnValue":true}' ;;
+esac

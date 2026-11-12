@@ -1,0 +1,7 @@
+#!/bin/sh
+# Stands in for ip(8) in the tests: the default routes in $FAKE_ROUTES and
+# the addresses in $FAKE_ADDRS (one per line, like the real output).
+case "$*" in
+    *"route show default"*) printf '%b\n' "${FAKE_ROUTES:-}" ;;
+    *"addr show"*) printf '%b\n' "${FAKE_ADDRS:-}" ;;
+esac

@@ -39,6 +39,10 @@
 #   kit-save [DIR] | kit-list [--json] | kit-restore NAME
 #                     save keys, the TV's SSH keys and settings to a USB
 #                     drive, and put them back after a reset or re-root
+#   update-check | update-install | update-status   a newer SSH Doctor from
+#                     GitHub, installed through the Homebrew Channel, then
+#                     the app opens again and shows what's new
+#   changes [VERSION] what changed in a version (from CHANGELOG.md)
 #   exposure [--json] | exposure-close
 #                     does the router forward SSH or telnet to the internet
 #                     (UPnP)?  exposure-close takes those forwards off
@@ -90,6 +94,10 @@ USBROOT="$R/tmp/usb"
 KITNAME=ssh-doctor-kit
 # The router's port forwards from the last exposure check (upnp.js)
 EXPOSURE="$RUN/exposure.json"
+# Updates: the last check (update.js), and the install's progress
+UPD="$RUN/update"
+LUNA="${SD_LUNA:-luna-send}"
+APP_ID=org.ohmybahgosh.sshdoctor
 # Entware's own SSH servers: checked, never changed or restarted.  Entware's
 # programs read /opt/etc for their settings and its passwd and shadow, so its
 # root password isn't the one in /etc/shadow.
@@ -187,9 +195,14 @@ loose() {
     return 1
 }
 
+# The TV's addresses, the main connection's first: the interface the default
+# route through a gateway goes out on (the lowest metric when there are
+# several), so a wired eth0 comes before Wi-Fi kept as a backup.  Link-local
+# 169.254 addresses (no DHCP answer) can't be reached, so they're left out.
 ips() {
     if [ -n "${SD_IPS:-}" ]; then say "$SD_IPS"; return; fi
-    ip -4 -o addr show 2>/dev/null | awk '$2 != "lo" { sub(/\/.*/, "", $4); print $4 }' | tr '\n' ' '
+    _dev=$(ip -4 route show default 2>/dev/null | awk '/ via / { m = 0; d = ""; for (i = 1; i < NF; i++) { if ($i == "dev") d = $(i + 1); if ($i == "metric") m = $(i + 1) } if (d != "") print m, d }' | sort -n | awk 'NR == 1 { print $2 }')
+    ip -4 -o addr show 2>/dev/null | awk -v d="$_dev" '$2 != "lo" { sub(/\/.*/, "", $4); if ($4 ~ /^169\.254\./) next; if ($2 == d) f = f $4 " "; else o = o $4 " " } END { printf "%s%s", f, o }'
 }
 
 # The key file, cleaned up: prints good key lines on fd 1, and writes what it
@@ -878,6 +891,8 @@ $1 "*) return 0 ;; esac
     # What the startup check did last time
     case " $(boot_result) " in *" started "*) add boot-started tip ;; esac
     case " $(boot_result) " in *" perms "*) add boot-perms tip ;; esac
+    # A newer version is out (from the last check)
+    if grep -q '"newer":true' "$UPD/check.json" 2>/dev/null; then add update-available tip; fi
     # The router forwards SSH or telnet to the internet (from the last check)
     if [ -f "$EXPOSURE" ]; then
         _xp=$(exposed_ports)
@@ -914,6 +929,7 @@ status_json() {
         "$([ "$_ko" = yes ] && echo true || echo false)" "$([ -x "$SFTP_SERVER" ] && echo true || echo false)" "${_badpw:-0}"
     printf '"settings":%s,"servers":%s,' "$(settings_json)" "$(servers_json)"
     printf '"entwareInstalled":%s,' "$([ -x "$OPT/bin/opkg" ] && echo true || echo false)"
+    printf '"update":%s,' "$(if [ -f "$UPD/check.json" ]; then tr -d '\n' < "$UPD/check.json"; else echo null; fi)"
     printf '"exposure":%s,' "$(if [ -f "$EXPOSURE" ]; then tr -d '\n' < "$EXPOSURE"; else echo null; fi)"
     printf '"active":%s,"entware":%s,"entwarePassword":%s,"entwareLogin":%s,' "$(js "$_active")" "$(ent_json)" \
         "$(js "$_entpw")" "$([ $_entlogin = yes ] && echo true || echo false)"
@@ -1441,6 +1457,90 @@ exposure_close() {
     say "The router doesn't forward SSH or telnet to this TV any more."
 }
 
+# ------------------------------------------------------------------ updates
+#
+# update-check asks GitHub for the latest release (update.js).  update-install
+# hands its IPK and SHA-256 to the Homebrew Channel, which downloads, checks
+# and installs it (that closes the app), then opens the app again with
+# {"updated": VERSION} so it shows what's new.  It runs from a copy in /tmp,
+# detached, since the install replaces this script.
+
+upd_state() {
+    mkdir -p "$UPD"
+    printf '{"state":%s,"version":%s,"error":%s}\n' "$(js "$1")" "$(js "${2:-}")" "$(js "${3:-}")" > "$UPD/state.json.tmp"
+    mv "$UPD/state.json.tmp" "$UPD/state.json"
+}
+upd_get() { sed -n "s/.*\"$1\":\"\([^\"]*\)\".*/\1/p" "$UPD/check.json" 2>/dev/null | awk 'NR == 1'; }
+
+update_check() {
+    _n=$(find_node)
+    [ -n "$_n" ] || die '{"error":"no-node"}'
+    mkdir -p "$UPD"
+    "$_n" "$HERE/update.js" check "$VERSION" > "$UPD/check.json.tmp" 2>/dev/null
+    if grep -q '"latest"' "$UPD/check.json.tmp" 2>/dev/null; then
+        mv "$UPD/check.json.tmp" "$UPD/check.json"
+        cat "$UPD/check.json"
+    else
+        _e=$(cat "$UPD/check.json.tmp" 2>/dev/null)
+        rm -f "$UPD/check.json.tmp"
+        say "${_e:-{\"error\":\"no-answer\"\}}"
+        return 1
+    fi
+}
+
+update_install() {
+    grep -q '"newer":true' "$UPD/check.json" 2>/dev/null || die '{"error":"nothing-newer"}'
+    if [ -z "$(upd_get ipkUrl)" ] || [ -z "$(upd_get sha256)" ]; then die '{"error":"bad-check"}'; fi
+    cp "$HERE/ssh-doctor.sh" "$UPD/run.sh"
+    upd_state starting "$(upd_get latest)"
+    if command -v setsid >/dev/null 2>&1; then
+        setsid sh "$UPD/run.sh" update-run < /dev/null > "$UPD/log" 2>&1 &
+    else
+        sh "$UPD/run.sh" update-run < /dev/null > "$UPD/log" 2>&1 &
+    fi
+    cat "$UPD/state.json"
+}
+
+update_run() {
+    _u=$(upd_get ipkUrl); _h=$(upd_get sha256); _v=$(upd_get latest)
+    upd_state installing "$_v"
+    # The Homebrew Channel downloads it, checks the SHA-256 and installs it,
+    # telling us as it goes; it ends with "finished" or an error
+    _r=no
+    "$LUNA" -i -w 600000 luna://org.webosbrew.hbchannel.service/install "{\"ipkUrl\":\"$_u\",\"ipkHash\":\"$_h\",\"subscribe\":true}" 2>&1 | {
+        while read -r _l; do
+            say "$_l"
+            case "$_l" in
+                *'"finished"'*true*) echo ok > "$UPD/result"; break ;;
+                *'"returnValue"'*false*|*errorText*) echo "$_l" > "$UPD/result"; break ;;
+            esac
+        done
+        cat > /dev/null
+    } > "$UPD/install.log"
+    if [ "$(cat "$UPD/result" 2>/dev/null)" = ok ]; then _r=yes; fi
+    if [ "$_r" != yes ]; then
+        upd_state failed "$_v" "$(sed -n 's/.*"errorText" *: *"\([^"]*\)".*/\1/p' "$UPD/result" 2>/dev/null | awk 'NR == 1')"
+        return 1
+    fi
+    upd_state 'done' "$_v"
+    rm -f "$UPD/check.json"
+    sleep 2
+    # Open the app again, to show what's new
+    "$LUNA" -n 1 luna://com.webos.applicationManager/launch "{\"id\":\"$APP_ID\",\"params\":{\"updated\":\"$_v\"}}" > /dev/null 2>&1
+    return 0
+}
+
+update_status() { if [ -f "$UPD/state.json" ]; then cat "$UPD/state.json"; else say '{"state":"none"}'; fi; }
+
+# What changed in VERSION (this one by default), from the bundled changelog
+changes() {
+    _cv=${1:-$VERSION}
+    awk -v v="$_cv" '
+        index($0, "## [" v "]") == 1 { on = 1; next }
+        on && /^## / { on = 0 }
+        on { print }' "$HERE/CHANGELOG.md" 2>/dev/null | sed '/./,$!d'
+}
+
 # ------------------------------------------------------------------ logins
 #
 # dropbear writes to webOS's system log (/tmp/var/log/legacy-log, a few hours
@@ -1725,7 +1825,12 @@ case "$CMD" in
     kit-restore) kit_restore "${1:-}" ;;
     exposure) exposure "${1:-}" ;;
     exposure-close) exposure_close ;;
+    update-check) update_check ;;
+    update-install) update_install ;;
+    update-run) update_run ;;
+    update-status) update_status ;;
+    changes) changes "${1:-}" ;;
     version) say "$VERSION" ;;
-    -h|--help|help) sed -n '2,48s/^# \{0,1\}//p' "$0" ;;
+    -h|--help|help) sed -n '2,53s/^# \{0,1\}//p' "$0" ;;
     *) die "Unknown command: $CMD (try: sh $0 help)" ;;
 esac

@@ -16,7 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: ShellCheck the script (POSIX sh, like the TV)
-        run: shellcheck -s sh ssh-doctor.sh tests/fakebin/dropbear tests/fakebin/telnetd tests/fakebin/fakeproc.sh tests/fakebin/sshd webos-app/build.sh
+        run: shellcheck -s sh ssh-doctor.sh tests/fakebin/dropbear tests/fakebin/telnetd tests/fakebin/fakeproc.sh tests/fakebin/sshd tests/fakebin/ip tests/fakebin/luna-send webos-app/build.sh
       - name: ShellCheck the test suite
         run: shellcheck -s sh tests/run.sh
       - name: Script parses under dash and busybox sh

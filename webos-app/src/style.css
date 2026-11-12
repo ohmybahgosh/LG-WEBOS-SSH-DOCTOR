@@ -98,6 +98,10 @@ footer .right { margin: 0 0 0 auto; }
 /* Long menus (More tools with Undo a change): tighter rows so they fit the screen */
 .menu.many .mrow { padding: 10px 28px; margin-bottom: 7px; font-size: 26px; }
 .menu.many .mrow small { font-size: 22px; }
+.menu.many.more .mrow { padding: 6px 28px; margin-bottom: 5px; }
+.panel.long { padding-top: 36px; padding-bottom: 32px; }
+.panel.long .panel-title { margin-bottom: 12px; }
+.panel.long .panel-hint { margin-top: 16px; }
 .in-label { display: block; font-size: 24px; color: #93a39b; margin: 14px 0 6px; }
 .in { width: 100%; font-size: 32px; padding: 14px 18px; border-radius: 14px; border: 3px solid #2b3632; background: #0b110f; color: #e8efeb; outline: none; font-family: "DejaVu Sans Mono", "Liberation Mono", Menlo, Consolas, monospace; }
 .in:focus { border-color: #2dd4bf; }
@@ -112,3 +116,8 @@ footer .right { margin: 0 0 0 auto; }
 .share-url { font-family: "DejaVu Sans Mono", "Liberation Mono", Menlo, Consolas, monospace; font-size: 21px; color: #e8efeb; word-break: break-all; }
 .share-code { font-family: "DejaVu Sans Mono", "Liberation Mono", Menlo, Consolas, monospace; font-size: 44px; font-weight: 800; letter-spacing: 5px; color: #2dd4bf; margin-top: 6px; }
 .panel-body pre.report { font-size: 21px; line-height: 1.35; max-height: 460px; overflow: hidden; }
+/* Release notes: headings and items, a few lines each */
+.notes { background: #0b110f; border-radius: 12px; padding: 14px 20px; margin: 4px 0 16px; }
+.notes .nh { font-size: 22px; font-weight: 700; color: #93a39b; text-transform: uppercase; letter-spacing: 1px; margin: 6px 0 4px; }
+.notes .ni { font-size: 24px; color: #e8efeb; padding-left: 26px; position: relative; margin: 4px 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.notes .ni:before { content: "•"; position: absolute; left: 6px; color: #2dd4bf; }

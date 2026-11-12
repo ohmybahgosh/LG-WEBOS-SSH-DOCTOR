@@ -1,6 +1,6 @@
 // Made-up answers from ssh-doctor.sh, so the TV app can run in a desktop
 // browser: load it before app.js.  Pick a TV with ?s=healthy, alpine, locked,
-// off, messy, entware, exposed or custom (its own settings, a port change underway).  ?pair=password
+// off, messy, entware, exposed, update or custom (its own settings, a port change underway).  ?pair=password
 // plays the pairing screen for a password.  The pairing screen plays out by itself: a phone connects,
 // then sends a key.
 (function () {
@@ -8,6 +8,8 @@
     var q = {};
     location.search.replace(/[?&]([^=&]+)=([^&]*)/g, function (m, k, v) { q[k] = decodeURIComponent(v); });
     var s = q.s || 'healthy';
+    // ?updated=0.5.0: opened again after an update
+    if (q.updated) { window.PalmSystem = { launchParams: JSON.stringify({ updated: q.updated }) }; }
     var host = [
         { type: 'ecdsa-sha2-nistp256', fp: 'SHA256:B5C9KdfzASiX45I7uRBUmHj9smXwnI7jxbdGvWkPQcQ' },
         { type: 'ssh-ed25519', fp: 'SHA256:oSe4QYniN2UbVtd+XkwQEqjqJ6GPF2e9qDFHwLc4j2s' },
@@ -50,7 +52,10 @@
             exposure: { router: 'found', name: 'ASUS GT-AXE16000', mappings: [], exposed: [
                 { protocol: 'TCP', external: 2222, internal: 22, client: '192.168.1.50', enabled: true, remote: '', description: 'ssh' },
                 { protocol: 'TCP', external: 23, internal: 23, client: '192.168.1.50', enabled: true, remote: '', description: '' }] },
-            findings: [f('telnet-exposed'), f('ssh-exposed'), f('boot-started', 'tip'), f('password-default', 'tip')] }
+            findings: [f('telnet-exposed'), f('ssh-exposed'), f('boot-started', 'tip'), f('password-default', 'tip')] },
+        // A newer version is out
+        update: { update: { current: '0.4.0', latest: '0.5.0', newer: true, ipkUrl: 'https://github.com/x.ipk', sha256: 'ab', notes: '### Added\n\n- **Copy it on your phone or computer.**  How to log in shows a QR code.\n- Update from the app.\n\n### Changed\n\n- **A new accent color,** teal.', published: '2026-11-13T12:00:00Z' },
+            findings: [f('update-available', 'tip')] }
     };
     var st = {};
     for (var k in base) { st[k] = base[k]; }
@@ -89,6 +94,9 @@
         'kit-list --json': JSON.stringify([{ name: '20261109-071500', saved: '2026-11-09T07:15:00', version: '0.4.0', keys: 2, hostKeys: 3, settings: true, password: true }]),
         'kit-save': 'Saved to /tmp/usb/sda/sda1/ssh-doctor-kit/20261109-071500\nIt has the TV\'s private SSH keys in it, so keep the drive somewhere safe.',
         'kit-restore \'20261109-071500\'': 'Backed up /home/root/.ssh/authorized_keys to /home/root/.ssh/authorized_keys.ssh-doctor-20261109-071600\nPut back the keys file: 2 keys.\nBacked up the TV\'s SSH keys to /var/lib/webosbrew/sshd.ssh-doctor-20261109-071600\nPut back the TV\'s SSH keys, so computers that logged in before don\'t warn.\nPut back the SSH settings.\nPut back your own password.',
+        'update-check': JSON.stringify(st.update || { current: '0.4.0', latest: '0.4.0', newer: false, notes: '' }),
+        'update-install': '{"state":"starting","version":"0.5.0","error":""}',
+        'update-status': '{"state":"installing","version":"0.5.0","error":""}',
         'exposure-close': 'Took the forwards off the router.\nThe router doesn\'t forward SSH or telnet to this TV any more.'
     };
     function pairState() {
@@ -107,6 +115,7 @@
         setTimeout(function () {
             if (args === 'status --json') { return cb(true, JSON.stringify(st), ''); }
             // The read-only page for a phone (How to log in, the report, the TV's keys)
+            if (args.indexOf('changes') === 0) { return cb(true, '### Added\n\n- **Copy it on your phone or computer.**  How to log in shows a QR code.\n- **Update from the app,** and see what\'s new after.\n\n### Changed\n\n- **Bigger text** in the pop-ups.\n- **A new accent color,** teal.\n', ''); }
             if (args === 'pair-start info') { infoMode = true; return cb(true, JSON.stringify({ state: 'waiting', purpose: 'info', code: 'Q4M-7TZ', port: 28622, ips: st.ips, triesLeft: 5 }), ''); }
             if (args === 'pair-stop info') { infoMode = false; return cb(true, '{"state":"stopped"}', ''); }
             if (args === 'pair-status' && infoMode) { return cb(true, JSON.stringify({ state: 'waiting', purpose: 'info', code: 'Q4M-7TZ', port: 28622, ips: st.ips, triesLeft: 5 }), ''); }

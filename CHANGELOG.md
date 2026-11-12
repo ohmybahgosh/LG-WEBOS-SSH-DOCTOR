@@ -8,10 +8,12 @@ All notable changes to LG webOS SSH Doctor.  Versions follow [semantic versionin
 
 - **Copy it on your phone or computer.**  How to log in, Report for getting help and the TV's key fingerprints show a QR code.  Scanning it opens a read-only page with everything ready to copy, one tap each: the login command for each kind of computer, an Open in an SSH app link for phones, the TV's fingerprints, the line for a changed host key, an SSH config, the keys that can log in, and the report with links to open a bug report or ask a question.  It works on several devices at once and stops when that screen closes.
 - The pairing screen's QR code carries the code, so scanning it connects without typing.
+- **Update from the app.**  Each time it opens, SSH Doctor checks GitHub for a newer release and offers **Update to v…** with what's new.  It installs through the Homebrew Channel, which checks the download's SHA-256 first, then the app opens again by itself and shows what changed.  More tools, **Updates** checks by hand.
 - **File transfer (SFTP)** says how to log in (your key, alpine or your own password) and where WinSCP, FileZilla and Cyberduck take a key, with the QR code to copy it all.
 
 ### Changed
 
+- **The TV's address is the main connection's:** the interface with the default route through a gateway comes first, so a wired eth0 shows instead of Wi-Fi kept as a backup.  A 169.254 address (no DHCP answer) is left out.
 - **Bigger text in the pop-ups and menus,** easier to read from the couch on any size of TV: tables like SSH servers on this TV and Login history, menu hints, the findings on the main screen, and the code boxes.
 - **A new accent color,** teal instead of green, so SSH Doctor doesn't look the same as LG-USB-2-ETH0 next to it.  The icon's plus sign too.
 
