@@ -411,6 +411,9 @@
         if (i > 0) { START[kv.slice(0, i)] = decodeURIComponent(kv.slice(i + 1)); }
     });
     if (location.hash && window.history && history.replaceState) { history.replaceState(null, '', location.pathname); }
+    // Scanning a QR code while this page is already open only changes the #:
+    // start over with the new code
+    window.addEventListener('hashchange', function () { if (/[#&]c=/.test(location.hash)) { location.reload(); } });
     if (START.c && /^[A-Za-z0-9-]{6,7}$/.test(START.c)) {
         var c0 = START.c.toUpperCase().replace(/[^A-Z0-9]/g, '');
         codeEl.value = c0.slice(0, 3) + '-' + c0.slice(3);

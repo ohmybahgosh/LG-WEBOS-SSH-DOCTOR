@@ -257,6 +257,8 @@ function handle(req, res) {
         });
         return;
     }
+    // Browsers ask for an icon: nothing, quietly, instead of a 404 in the console
+    if (p === '/favicon.ico') { res.writeHead(204); res.end(); return; }
     if (req.method === 'POST' && p === '/api/code') { return apiCode(req, res); }
     if (req.method === 'POST' && p === '/api/key') { return apiKey(req, res); }
     if (req.method === 'POST' && p === '/api/password') { return apiPassword(req, res); }
