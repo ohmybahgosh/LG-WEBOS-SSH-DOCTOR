@@ -20,7 +20,7 @@
         port: 22, portOwner: 'hbc', keysOnly: false, sftp: true, failedLogins: 0,
         settings: { port: 22, trial: null, keysOnly: false, keepalive: false, password: false, hook: false, applied: true, flags: '-R' },
         servers: [{ pid: 5550, kind: 'hbc', name: 'dropbear', ports: [22], cmd: '/media/developer/apps/usr/palm/services/org.webosbrew.hbchannel.service/bin/dropbear -R' }],
-        sessions: { '22': 1 }
+        sessions: { '22': 1 }, entwareInstalled: false
     };
     function f(code, level) { return { code: code, level: level || 'problem' }; }
     var TVS = {
@@ -37,7 +37,7 @@
             sessions: { '2222': 1, '22': 0 },
             findings: [f('port-trial', 'tip'), f('failed-logins', 'tip'), f('other-ssh', 'tip')] },
         // The Homebrew Channel's SSH off, Entware's OpenSSH on 22, Entware's dropbear installed but stopped
-        entware: { sshEnabled: false, running: false, listening: false, portOwner: 'entware-openssh', active: 'entware-openssh',
+        entware: { sshEnabled: false, running: false, listening: false, portOwner: 'entware-openssh', active: 'entware-openssh', entwareInstalled: true,
             entwarePassword: 'none', entwareLogin: true,
             servers: [{ pid: 7001, kind: 'entware-openssh', name: 'sshd', ports: [22], cmd: '/opt/sbin/sshd' },
                 { pid: 7300, kind: 'devmode', name: 'sshd', ports: [9922], cmd: '/usr/sbin/sshd -f /etc/devmode/sshd_config' }],

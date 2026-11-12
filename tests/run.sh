@@ -80,6 +80,7 @@ test_healthy() {
     check "password none" is "$(field password)" '"none"'
     check "listening" is "$(field listening)" true
     check "the IP" is "$(field ips)" '["192.168.1.50"]'
+    check "no Entware" is "$(field entwareInstalled)" false
 }
 
 test_ssh_off_then_on() {
@@ -583,7 +584,10 @@ test_entware_openssh_in_use() {
     check "says Entware's is in use" finding ssh-is-entware
     check "no other-ssh as well" nofinding other-ssh
     check "only tips" is "$(levels)" tip
+    mkdir -p "$(OPTD)/bin"; printf '#!/bin/sh\n' > "$(OPTD)/bin/opkg"; chmod 755 "$(OPTD)/bin/opkg"
+    json
     check "active" is "$(field active)" '"entware-openssh"'
+    check "Entware installed" is "$(field entwareInstalled)" true
     check "can log in" is "$(field entwareLogin)" true
     check "running, on 2200" is "$(ent entware-openssh ports)" '[2200]'
     run status

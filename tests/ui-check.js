@@ -23,7 +23,7 @@ const P = (m) => { problems++; console.log('PROBLEM ' + m); };
 
 const SMALL = /\b(the|is|are|was|it|this|that|and|but|or|to|of|on|in|with|your|for|key|keys|press|log|set|fix|turn|now|check|nobody|password)\b/i;
 const ENG = /[A-Za-z']{2,}(?:[ ,]+[A-Za-z'-]{2,}){2,}/;
-const OKW = /SSH Doctor|Homebrew Channel|LG-WEBOS-SSH-DOCTOR|github\.com\S*|root@\S+|ssh(-keygen)? [^\n]*|SHA256:\S+|ssh-ed25519|ssh-rsa|ecdsa[^\s]*|authorized_keys\S*|\/home\/root\S*|bob@\S+|lgtv-\S+|alpine|PowerShell|Terminal|Mac|Linux|Windows|Telnet|telnet|Node\.js|dropbear [0-9.]+|\/\S*\/(dropbear|sshd)[^\n]*|REMOTE HOST IDENTIFICATION HAS CHANGED|crlf|private|rootmy\.tv|-o/g;
+const OKW = /SSH Doctor|Homebrew Channel|LG-WEBOS-SSH-DOCTOR|github\.com\S*|root@\S+|ssh(-keygen)? [^\n]*|SHA256:\S+|ssh-ed25519|ssh-rsa|ecdsa[^\s]*|authorized_keys\S*|\/home\/root\S*|bob@\S+|lgtv-\S+|alpine|PowerShell|Terminal|Mac|Linux|Windows|Telnet|telnet|Node\.js|dropbear [0-9.]+|\/\S*\/(dropbear|sshd)[^\n]*|REMOTE HOST IDENTIFICATION HAS CHANGED|crlf|private|rootmy\.tv|-o|\b(bash|tmux|nano|vim|htop|git|rsync)\b/g;
 
 async function tv(b) {
     const work = fs.mkdtempSync(path.join(os.tmpdir(), 'sd-ui-'));

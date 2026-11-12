@@ -10,6 +10,11 @@ All notable changes to LG webOS SSH Doctor.  Versions follow [semantic versionin
 - **Reachable from the internet?** in More tools.  Asks the router (UPnP) whether it forwards the TV's SSH or telnet to the internet, every time the app opens, and **Close it on the router** takes those forwards off.  A forwarded telnet port (root with no password) is flagged first.
 - **Save or restore my setup** in More tools.  Saves your keys, the TV's own SSH keys, your settings and your password's hash to a USB drive, and puts them back after a factory reset and rooting again, so computers don't warn REMOTE HOST IDENTIFICATION HAS CHANGED.  Everything it replaces is backed up first.
 - `set-bootfix`, `exposure`, `exposure-close`, `kit-save`, `kit-list` and `kit-restore` for the script on its own.
+- **Get more from SSH,** in More tools, when Entware isn't installed: what Entware adds to an SSH session (bash, tmux, nano, htop and hundreds more) and where to get it.  A one-line pointer shows on the main screen only when there's nothing else to say.
+
+### Fixed
+
+- **Open SSH sessions stay connected through every restart,** not just the first.  After dropbear restarted, its open sessions looked like servers, so the next change (keeping a new port, a setting) closed them, and the status could say SSH was running when only old sessions were left.  Found while testing on a real TV.
 
 ### Changed
 

@@ -907,6 +907,7 @@ status_json() {
     printf '"port":%s,"portOwner":%s,"keysOnly":%s,"sftp":%s,"failedLogins":%s,' "$_port" "$(js "$_owner")" \
         "$([ "$_ko" = yes ] && echo true || echo false)" "$([ -x "$SFTP_SERVER" ] && echo true || echo false)" "${_badpw:-0}"
     printf '"settings":%s,"servers":%s,' "$(settings_json)" "$(servers_json)"
+    printf '"entwareInstalled":%s,' "$([ -x "$OPT/bin/opkg" ] && echo true || echo false)"
     printf '"exposure":%s,' "$(if [ -f "$EXPOSURE" ]; then tr -d '\n' < "$EXPOSURE"; else echo null; fi)"
     printf '"active":%s,"entware":%s,"entwarePassword":%s,"entwareLogin":%s,' "$(js "$_active")" "$(ent_json)" \
         "$(js "$_entpw")" "$([ $_entlogin = yes ] && echo true || echo false)"

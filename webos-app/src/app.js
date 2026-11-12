@@ -204,7 +204,9 @@
         var f = (s.findings || []).slice().sort(function (a, b) { return a.level === b.level ? 0 : (a.level === 'problem' ? -1 : 1); });
         $('findings').innerHTML = f.slice(0, f.length > 3 ? 3 : 4).map(function (x) {
             return '<li class="' + (x.level === 'tip' ? 'tip' : '') + '">' + esc(T(FINDINGS[x.code] || x.code)) + '</li>';
-        }).join('');
+        }).join('')
+            // A quiet pointer to Entware, only when there's room and it isn't installed
+            + (s.entwareInstalled === false && f.length <= 1 ? '<li class="tip extra">' + esc(T('Want more from SSH?  Entware adds bash, tmux, nano and hundreds of Linux tools.  More tools, Get more from SSH.')) + '</li>' : '');
         $('status').className = 'card' + (f.length > 2 ? ' compact' : '');
 
         show('sshon', find('ssh-off') || find('ssh-not-running') || find('ssh-off-next-boot'));
@@ -679,6 +681,7 @@
             { label: T('SSH servers on this TV'), hint: T('{n} found', { n: (s.servers || []).length }), fn: serversInfo },
             { label: T('Reachable from the internet?'), hint: exposureHint(), fn: exposureInfo, fix: find('ssh-exposed') || find('telnet-exposed') },
             { label: T('Save or restore my setup'), hint: T('on a USB drive, for after a reset'), fn: kitMenu },
+            s.entwareInstalled === false ? { label: T('Get more from SSH'), hint: T('Entware: bash, tmux, nano and more'), fn: entwareInfo } : null,
             { label: T('Report for getting help'), hint: T('no private details'), fn: reportShow },
             backups.length ? { label: T('Undo a change'), hint: T('put a backup back'), fn: actions.restore } : null,
             { label: T('Go back to password login'), hint: T('if you\'re locked out'), fn: actions.password }
@@ -735,6 +738,16 @@
     }
     function closeExposure() {
         act(T('Close it on the router'), 'exposure-close', p(esc(T('The router doesn\'t forward SSH or telnet to this TV any more.'))));
+    }
+
+    // ------------------------------------------------------------------ Entware
+
+    function entwareInfo() {
+        var url = 'https://ohmybahgosh.dev/webos-entware-installer/';
+        message(T('Get more from SSH'), '<div class="pair">' + qrSvg(url) + '<div class="pair-side">'
+            + p(esc(T('Entware turns an SSH session on this TV into a real Linux shell: bash with history and tab completion, tmux to keep work running after you disconnect, nano and vim, htop, git, rsync, and hundreds more packages.')))
+            + p(esc(T('It\'s free and open source, from the same Homebrew Channel repository as SSH Doctor: install Entware from the Homebrew Channel\'s app list.  Scan the code for what it can do.')))
+            + '</div></div>');
     }
 
     // ------------------------------------------------------------------ survival kit
