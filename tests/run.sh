@@ -545,7 +545,7 @@ test_report() {
     flag_on; sshd_up; cat "$T/k_ed.pub" > "$(AK)"; chmod 600 "$(AK)"
     echo "2026-11-08T02:00:00.1Z [1.0] authpriv.notice dropbear[101] Password auth succeeded for 'root' from 192.168.1.11:5001" > "$T/log/legacy-log"
     run report
-    check "has versions" has "SSH Doctor 0.3.0"
+    check "has versions" has "SSH Doctor 0.4.0"
     check "has findings line" has "Findings:"
     check "no IP addresses" sh -c "! printf '%s' '$OUT' | grep -Eq '([0-9]{1,3}\.){3}[0-9]{1,3}'"
     check "no key fingerprints" lacks "SHA256:"

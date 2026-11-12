@@ -2,7 +2,7 @@
 
 All notable changes to LG webOS SSH Doctor.  Versions follow [semantic versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.4.0] - 2026-11-12
 
 ### Added
 
@@ -21,6 +21,8 @@ All notable changes to LG webOS SSH Doctor.  Versions follow [semantic versionin
 - The startup script runs the app's own copy of `ssh-doctor.sh` when the app is installed, so an update takes effect at the next restart.
 - Long menus get tighter rows so they fit on screen.
 - Spanish: the Entware texts from 0.3.0 now use "usted" like the rest of the app.
+
+Tested on a real TV (LG C2, webOS 25): the router check against a real router, Fix SSH at startup with the SSH server stopped by hand and through a real restart, a save and restore of keys, host keys and settings with an SSH session open throughout, and every new screen.
 
 ## [0.3.0] - 2026-11-08
 
