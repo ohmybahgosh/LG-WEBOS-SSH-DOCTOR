@@ -1,7 +1,8 @@
 #!/bin/sh
 # Stands in for luna-send in the tests: logs each call to $FAKE_LUNA_LOG and
 # answers the Homebrew Channel's install the way it does, with progress and
-# then "finished" (or an error when FAKE_LUNA_FAIL is set).
+# then "finished" (or an error when FAKE_LUNA_FAIL is set), and then
+# keeps the subscription open, as the real one does.
 printf '%s\n' "$*" >> "${FAKE_LUNA_LOG:-/dev/null}"
 case "$*" in
     *hbchannel.service/install*)
@@ -12,6 +13,8 @@ case "$*" in
         fi
         echo '{"returnValue":true,"statusText":"Installing"}'
         echo '{"returnValue":true,"finished":true,"statusText":"Finished"}'
+        # Like the real one: the subscription stays open after "finished"
+        exec sleep 30
         ;;
     *) echo '{"returnValue":true}' ;;
 esac

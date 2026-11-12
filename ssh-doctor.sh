@@ -1505,18 +1505,21 @@ update_run() {
     _u=$(upd_get ipkUrl); _h=$(upd_get sha256); _v=$(upd_get latest)
     upd_state installing "$_v"
     # The Homebrew Channel downloads it, checks the SHA-256 and installs it,
-    # telling us as it goes; it ends with "finished" or an error
+    # telling us as it goes.  It ends with "finished" or an error, but keeps
+    # the subscription open, so watch its output and stop it then.
     _r=no
-    "$LUNA" -i -w 600000 luna://org.webosbrew.hbchannel.service/install "{\"ipkUrl\":\"$_u\",\"ipkHash\":\"$_h\",\"subscribe\":true}" 2>&1 | {
-        while read -r _l; do
-            say "$_l"
-            case "$_l" in
-                *'"finished"'*true*) echo ok > "$UPD/result"; break ;;
-                *'"returnValue"'*false*|*errorText*) echo "$_l" > "$UPD/result"; break ;;
-            esac
-        done
-        cat > /dev/null
-    } > "$UPD/install.log"
+    rm -f "$UPD/result"
+    "$LUNA" -i -w 600000 luna://org.webosbrew.hbchannel.service/install "{\"ipkUrl\":\"$_u\",\"ipkHash\":\"$_h\",\"subscribe\":true}" > "$UPD/install.log" 2>&1 &
+    _lp=$!
+    _i=0
+    while [ $_i -lt 600 ]; do
+        if grep -q '"finished" *: *true' "$UPD/install.log" 2>/dev/null; then echo ok > "$UPD/result"; break; fi
+        if grep -q '"returnValue" *: *false' "$UPD/install.log" 2>/dev/null; then grep '"returnValue" *: *false' "$UPD/install.log" | awk 'NR == 1' > "$UPD/result"; break; fi
+        kill -0 "$_lp" 2>/dev/null || { sleep 1; grep -q '"finished" *: *true' "$UPD/install.log" && echo ok > "$UPD/result"; break; }
+        sleep 1
+        _i=$((_i + 1))
+    done
+    kill "$_lp" 2>/dev/null
     if [ "$(cat "$UPD/result" 2>/dev/null)" = ok ]; then _r=yes; fi
     if [ "$_r" != yes ]; then
         upd_state failed "$_v" "$(sed -n 's/.*"errorText" *: *"\([^"]*\)".*/\1/p' "$UPD/result" 2>/dev/null | awk 'NR == 1')"
