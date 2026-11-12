@@ -2,7 +2,7 @@
 
 All notable changes to LG webOS SSH Doctor.  Versions follow [semantic versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.5.0] - 2026-11-12
 
 ### Added
 
@@ -16,6 +16,8 @@ All notable changes to LG webOS SSH Doctor.  Versions follow [semantic versionin
 - **The TV's address is the main connection's:** the interface with the default route through a gateway comes first, so a wired eth0 shows instead of Wi-Fi kept as a backup.  A 169.254 address (no DHCP answer) is left out.
 - **Bigger text in the pop-ups and menus,** easier to read from the couch on any size of TV: tables like SSH servers on this TV and Login history, menu hints, the findings on the main screen, and the code boxes.
 - **A new accent color,** teal instead of green, so SSH Doctor doesn't look the same as LG-USB-2-ETH0 next to it.  The icon's plus sign too.
+
+Tested on a real TV (LG C2, webOS 25): a full update from the app (against a stand-in release server: about 2 seconds to install, then the app opened again on what changed), a password set from the phone page and from the TV's keyboard that still worked after a restart, the copy page on a phone, the file transfer hints, the main connection's address with eth0 and Wi-Fi both up, and every pop-up's text size.
 
 ## [0.4.0] - 2026-11-12
 

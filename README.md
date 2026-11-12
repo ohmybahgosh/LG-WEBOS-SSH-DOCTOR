@@ -104,6 +104,10 @@ After a key is added, the pairing page also offers a ready-made `~/.ssh/config` 
 
 **Copy it on your phone or computer.**  **How to log in**, **Report for getting help** and the TV's key fingerprints each show a QR code beside them.  Scan it and a page opens on your phone with everything ready to copy, one tap each: the login command for Mac, Linux, Windows, PuTTY or SFTP, an **Open in an SSH app** link for Termius and the like, the TV's fingerprints, the `ssh-keygen -R` line for a changed host key, an SSH config, the keys that can log in, and the report with links to open a bug report.  On a computer, type the address and the code instead.  It's read only, works on several devices at once, and stops when you close that screen on the TV.  The QR code on the pairing screen carries its code too, so scanning connects straight away.
 
+<p><img src="assets/screenshots/tv-howto.png" width="70%" alt="How to log in on the TV, with a QR code to copy it on a phone"> <img src="assets/screenshots/info-phone.png" width="24%" alt="The copy page on a phone: the login command, an SSH config and the TV's known_hosts lines, each with a Copy button"></p>
+
+<p><img src="assets/screenshots/tv-sftp.png" width="49%" alt="File transfer (SFTP): the host, port and user, whether to use your key or password, and where WinSCP, FileZilla and Cyberduck take a key"> <img src="assets/screenshots/tv-update.png" width="49%" alt="The main screen offering Update to v0.5.0"></p>
+
 ## What it will never do
 
 Touch system partitions, change the Homebrew Channel's own files, change another SSH server than the Homebrew Channel's, turn telnet off unless you ask, or send your keys or password anywhere.  It warns before anything that would turn password login off, because adding the first key disables `alpine` at the next boot, and that catches a lot of people out.
@@ -130,6 +134,8 @@ sh ssh-doctor.sh set-keys-only on        # or off; also: set-keepalive on|off
 sh ssh-doctor.sh set-password '$6$...'   # a hash, e.g. from: openssl passwd -6
 sh ssh-doctor.sh reset-settings          # back to the Homebrew Channel's defaults
 sh ssh-doctor.sh logins        # recent logins and failed tries
+sh ssh-doctor.sh update-check  # a newer release?  update-install gets it
+sh ssh-doctor.sh changes       # what changed in this version
 sh ssh-doctor.sh report        # a report for asking for help
 ```
 
