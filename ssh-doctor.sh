@@ -366,10 +366,11 @@ ssh_procs() {
 
 cmdline_of() { tr '\000' ' ' < "$PROC/$1/cmdline" 2>/dev/null | sed 's/ *$//'; }
 
-# Server processes: those whose parent isn't the same kind of server
+# Server processes: those whose parent isn't the same kind of server.
+# "PID COMM PPID"
 server_pids() {
     ssh_procs > "$RUN/procs.$$"
-    awk 'NR == FNR { c[$1] = $3; next } c[$2] != $3 { print $1, $3 }' "$RUN/procs.$$" "$RUN/procs.$$"
+    awk 'NR == FNR { c[$1] = $3; next } c[$2] != $3 { print $1, $3, $2 }' "$RUN/procs.$$" "$RUN/procs.$$"
     rm -f "$RUN/procs.$$"
 }
 
@@ -406,9 +407,15 @@ server_kind() {
 # it after starting or stopping a server
 servers_list() {
     if [ ! -f "$RUN/servers.$$" ]; then
-        server_pids | while read -r _p _c; do
+        server_pids | while read -r _p _c _pp; do
             [ "$_c" = telnetd ] && continue
+            # A login session, not a server: dropbear runs each one as
+            # "dropbear ... -2 N", OpenSSH as "sshd: user@pts/0".  After the
+            # server restarts, its old sessions are left with init as parent
+            # and look like servers otherwise.
+            case " $(cmdline_of "$_p") " in *" -2 "*|" sshd: "*) continue ;; esac
             _ps=$(ports_of "$_p")
+            [ -z "$_ps" ] && [ "$_pp" = 1 ] && continue
             say "$_p $(server_kind "$_p" "$_c" "$_ps") $_c $_ps"
         done > "$RUN/servers.$$.tmp"
         mv "$RUN/servers.$$.tmp" "$RUN/servers.$$"

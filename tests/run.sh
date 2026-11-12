@@ -816,7 +816,31 @@ test_exposure() {
     check "no finding without an answer" nofinding ssh-exposed
 }
 
-for c in boot_fix kit exposure entware_openssh_in_use entware_openssh_root_password entware_openssh_broken entware_port_clash entware_dropbear \
+test_sessions_kept() {
+    # Found on a real TV: after dropbear restarts, its open sessions are left
+    # with init as their parent.  They must not count as the server, or the
+    # next restart closes them.
+    flag_on; sshd_up; cat "$T/k_ed.pub" > "$(AK)"; chmod 600 "$(AK)"
+    _hbc=$(fake_pids | head -n 1)
+    _s1=$(fake_proc dropbear "$BIN/dropbear -R -2 9" 1)
+    _s2=$(fake_proc dropbear "$BIN/dropbear -R" 1)
+    run servers --json
+    check "only the server listed" sh -c "printf '%s' '$OUT' | python3 -c \"import json,sys; d=json.load(sys.stdin); assert [x['pid'] for x in d]==[$_hbc], d\""
+    run set-keepalive on
+    json
+    check "restarted with the setting" is "$(flags)" "-R -K 30"
+    check "session (-2) still open" test -d "$SD_ROOT/proc/$_s1"
+    check "session (old style) still open" test -d "$SD_ROOT/proc/$_s2"
+    run set-keepalive off
+    check "still open after a second restart" test -d "$SD_ROOT/proc/$_s1"
+    # The server gone, only sessions left: SSH isn't running
+    for p in $(fake_pids); do [ "$p" = "$_s1" ] || [ "$p" = "$_s2" ] || fake_kill "$p"; done
+    json
+    check "not running" is "$(field running)" false
+    check "found as not running" finding ssh-not-running
+}
+
+for c in sessions_kept boot_fix kit exposure entware_openssh_in_use entware_openssh_root_password entware_openssh_broken entware_port_clash entware_dropbear \
     healthy ssh_off_then_on flag_but_not_running running_but_off_next_boot locked_out_then_password \
     no_keys_no_password messy_key_file loose_home add_key restore legacy_dropbear host_fingerprints \
     failsafe_and_telnet pairing pairing_wrong_codes pairing_screen_closed servers port_taken port_change \
