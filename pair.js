@@ -221,7 +221,7 @@
 
     // ------------------------------------------------------------ step 4
 
-    function esc(x) { return String(x).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+    function esc(x) { return String(x).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
     function pre(x) { return '<pre>' + esc(x) + '</pre>'; }
     function p(x) { return '<p>' + esc(x) + '</p>'; }
     var legacyOpts = function () { return info.legacyRsa ? '-o HostKeyAlgorithms=+ssh-rsa -o PubkeyAcceptedAlgorithms=+ssh-rsa ' : ''; };

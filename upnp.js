@@ -12,8 +12,10 @@
  * Finds the router with an SSDP search on the home network, reads its
  * description, then asks its WANIPConnection (or WANPPPConnection) service.
  * Only routers with UPnP on answer, and ports forwarded by hand in the
- * router's settings usually aren't listed.  SD_SSDP_ADDR=HOST:PORT sends the
- * search there instead of the multicast address (for the tests).
+ * router's settings usually aren't listed.  Only a description and control
+ * address on the home network device that answered is used, and answers
+ * are size-capped.  SD_SSDP_ADDR=HOST:PORT sends the search there instead of
+ * the multicast address (for the tests, which also allows 127.0.0.1).
  * Plain ES5 for older Node.js.
  */
 'use strict';
@@ -21,9 +23,11 @@ var dgram = require('dgram');
 var http = require('http');
 var url = require('url');
 
+var TEST = !!process.env.SD_SSDP_ADDR;
 var SSDP = (process.env.SD_SSDP_ADDR || '239.255.255.250:1900').split(':');
 var WAIT_MS = parseInt(process.env.SD_SSDP_WAIT || '2500', 10);
 var MAX_ENTRIES = 128;
+var MAX_BYTES = 256 * 1024;
 var SERVICES = [
     'urn:schemas-upnp-org:service:WANIPConnection:2',
     'urn:schemas-upnp-org:service:WANIPConnection:1',
@@ -36,6 +40,18 @@ function bufFrom(s) { return hasFrom ? Buffer.from(s) : new Buffer(s); }
 
 function out(o) { process.stdout.write(JSON.stringify(o) + '\n'); }
 function fail(code) { out({ router: 'error', error: code, mappings: [] }); process.exit(1); }
+
+// Only a description on the device that answered, at a home network
+// address: anything on the network can answer a search, and it mustn't be
+// able to send the TV to another machine, or to the TV's own services
+function privateIp(h) {
+    return /^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)[0-9.]+$/.test(h) || (TEST && h === '127.0.0.1');
+}
+function locationOk(loc, from) {
+    var p = url.parse(loc);
+    return p.protocol === 'http:' && p.hostname === from && privateIp(p.hostname) && portOk(p.port);
+}
+function portOk(port) { return !port || (parseInt(port, 10) > 0 && parseInt(port, 10) < 65536); }
 
 // The routers that answer an SSDP search, by their description URL
 function discover(done) {
@@ -50,9 +66,9 @@ function discover(done) {
         done(list);
     }
     sock.on('error', finish);
-    sock.on('message', function (msg) {
+    sock.on('message', function (msg, rinfo) {
         var m = String(msg).match(/^location:\s*(\S+)/im);
-        if (m && !found[m[1]]) { found[m[1]] = 1; list.push(m[1]); }
+        if (m && !found[m[1]] && locationOk(m[1], rinfo.address)) { found[m[1]] = 1; list.push(m[1]); }
     });
     sock.bind(0, function () {
         ['urn:schemas-upnp-org:device:InternetGatewayDevice:1', 'urn:schemas-upnp-org:device:InternetGatewayDevice:2',
@@ -64,12 +80,19 @@ function discover(done) {
     });
 }
 
-function fetch(u, opts, body, done) {
+function fetch(u, opts, body, cb) {
+    var called = false;
+    function done(e, code, text) { if (!called) { called = true; cb(e, code, text); } }
     var p = url.parse(u);
     var req = http.request({ hostname: p.hostname, port: p.port || 80, path: p.path, method: opts.method || 'GET', headers: opts.headers || {} }, function (res) {
-        var chunks = [];
-        res.on('data', function (c) { chunks.push(c); });
-        res.on('end', function () { done(null, res.statusCode, Buffer.concat(chunks).toString('utf8')); });
+        var chunks = [], size = 0, over = false;
+        res.on('data', function (c) {
+            size += c.length;
+            // Router descriptions and answers are a few kilobytes
+            if (size > MAX_BYTES) { if (!over) { over = true; req.abort(); done('too-big'); } return; }
+            chunks.push(c);
+        });
+        res.on('end', function () { if (!over) { done(null, res.statusCode, Buffer.concat(chunks).toString('utf8')); } });
     });
     req.setTimeout(4000, function () { req.abort(); });
     req.on('error', function (e) { done(e); });
@@ -91,7 +114,11 @@ function service(loc, done) {
         for (var i = 0; i < SERVICES.length; i++) {
             for (var j = 0; j < blocks.length; j++) {
                 if (tag(blocks[j], 'serviceType') === SERVICES[i]) {
-                    done({ type: SERVICES[i], control: url.resolve(base, tag(blocks[j], 'controlURL')), name: tag(xml, 'friendlyName') });
+                    var control = url.resolve(base, tag(blocks[j], 'controlURL'));
+                    // Only the router that answered, over plain http
+                    var cp = url.parse(control);
+                    if (cp.protocol !== 'http:' || cp.hostname !== url.parse(loc).hostname) { done(null); return; }
+                    done({ type: SERVICES[i], control: control, name: tag(xml, 'friendlyName').slice(0, 100) });
                     return;
                 }
             }
@@ -100,10 +127,12 @@ function service(loc, done) {
     });
 }
 
+function xmlEsc(v) { return String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
 function soap(svc, action, args, done) {
     var body = '<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">'
         + '<s:Body><u:' + action + ' xmlns:u="' + svc.type + '">'
-        + Object.keys(args).map(function (k) { return '<' + k + '>' + args[k] + '</' + k + '>'; }).join('')
+        + Object.keys(args).map(function (k) { return '<' + k + '>' + xmlEsc(args[k]) + '</' + k + '>'; }).join('')
         + '</u:' + action + '></s:Body></s:Envelope>';
     fetch(svc.control, { method: 'POST', headers: {
         'Content-Type': 'text/xml; charset="utf-8"', 'SOAPAction': '"' + svc.type + '#' + action + '"', 'Content-Length': Buffer.byteLength(body)

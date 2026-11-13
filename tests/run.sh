@@ -262,6 +262,10 @@ test_pairing() {
     _u="http://127.0.0.1:$_port"
     check "page served" sh -c "curl -s '$_u/' | grep -q 'Enter the code'"
     check "key maker served" sh -c "curl -s '$_u/sshkey.js' | grep -q makeKey"
+    check "only by the TV's address (no DNS rebinding)" is "$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: tv.example.com' "$_u/")" 403
+    check "a .local name works" is "$(curl -s -o /dev/null -w '%{http_code}' -H "Host: lgtv.local:$_port" "$_u/")" 200
+    _r=$(curl -s -X POST -H 'Origin: http://evil.example' -d '{"code":"AAA-AAA"}' "$_u/api/code")
+    OUT=$_r; check "no posting from another site" has "by the TV"
     _r=$(curl -s -X POST -d '{"code":"AAA-AAA"}' "$_u/api/code")
     check "wrong code refused" sh -c "printf '%s' '$_r' | grep -q '\"triesLeft\":4'"
     _r=$(curl -s -X POST -d "{\"code\":\"$(printf '%s' "$_code" | tr '[:upper:]' '[:lower:]' | tr -d -)\"}" "$_u/api/code")
@@ -390,6 +394,8 @@ test_password() {
     flag_on; sshd_up; cat "$T/k_ed.pub" > "$(AK)"; chmod 600 "$(AK)"
     run set-password 'alpine'
     check "plain text refused" is "$RC" 1
+    run set-password "\$6\$rounds=999999999\$${HASH#\$6\$}"
+    check "a hash that would take minutes per login refused" is "$RC" 1
     run set-password "$HASH"
     check "set" has "Set root's password"
     check "shadow has it" grep -q -F "root:$HASH:" "$SD_ROOT/etc/shadow"
@@ -545,7 +551,7 @@ test_report() {
     flag_on; sshd_up; cat "$T/k_ed.pub" > "$(AK)"; chmod 600 "$(AK)"
     echo "2026-11-08T02:00:00.1Z [1.0] authpriv.notice dropbear[101] Password auth succeeded for 'root' from 192.168.1.11:5001" > "$T/log/legacy-log"
     run report
-    check "has versions" has "SSH Doctor 0.5.0"
+    check "has versions" has "SSH Doctor 0.5.1"
     check "has findings line" has "Findings:"
     check "no IP addresses" sh -c "! printf '%s' '$OUT' | grep -Eq '([0-9]{1,3}\.){3}[0-9]{1,3}'"
     check "no key fingerprints" lacks "SHA256:"
@@ -895,7 +901,7 @@ test_update() {
     run update-install
     check "started" has '"state":"starting"'
     check "installed" upd_wait "done"
-    check "through the Homebrew Channel, with the hash" grep -q "hbchannel.service/install.*sd_9.9.9.ipk.*\"ipkHash\":\"abab" "$T/luna.log"
+    check "through the Homebrew Channel, with the hash" grep -q "hbchannel.service/install.*/download/v9.9.9/org.ohmybahgosh.sshdoctor_9.9.9_all.ipk.*\"ipkHash\":\"abab" "$T/luna.log"
     _i=0; while [ $_i -lt 30 ] && ! grep -q applicationManager "$T/luna.log"; do sleep 0.2; _i=$((_i + 1)); done
     check "then the app opens again with what's new" grep -q 'applicationManager/launch.*"updated":"9.9.9"' "$T/luna.log"
     json
@@ -914,8 +920,46 @@ test_update() {
     run update-install
     check "install refused" is "$RC" 1
     release_stop
+    # A manifest pointing at another file, or at an older release, isn't installed
+    for _bad in FAKE_IPK_URL=https://evil.example/org.ohmybahgosh.sshdoctor_9.9.9_all.ipk FAKE_IPK_V=0.1.0; do
+        rm -f "$SD_ROOT/tmp/ssh-doctor/update/check.json"
+        export "${_bad?}"
+        release_start 9.9.9
+        run update-check
+        check "$_bad: refused" has unexpected-url
+        run update-install
+        check "$_bad: nothing installed" is "$RC" 1
+        release_stop
+        unset FAKE_IPK_URL FAKE_IPK_V
+    done
     run changes 0.4.0
     check "what changed in a version" has "Fix SSH at startup"
+}
+
+test_run_dir_safe() {
+    flag_on; sshd_up; cat "$T/k_ed.pub" > "$(AK)"; chmod 600 "$(AK)"
+    _rd="$SD_ROOT/tmp/ssh-doctor"
+    # Another program left a link in /tmp where the script keeps its files
+    mkdir -p "$T/elsewhere" "$SD_ROOT/tmp"
+    ln -s "$T/elsewhere" "$_rd"
+    json
+    check "still works" python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$T/s.json"
+    check "a real folder now" sh -c "[ -d '$_rd' ] && [ ! -L '$_rd' ]"
+    check "nobody else can use it" sh -c "ls -ld '$_rd' | grep -q '^drwx------'"
+    run fix-keys
+    check "nothing written through the link" sh -c "[ -z \"\$(ls -A '$T/elsewhere')\" ]"
+    # A file there instead
+    rm -rf "$_rd"; : > "$_rd"
+    run status
+    check "a file is replaced by a folder" sh -c "[ -d '$_rd' ]"
+    # An older version's folder, readable by others
+    chmod 755 "$_rd"
+    run status
+    check "made private" sh -c "ls -ld '$_rd' | grep -q '^drwx------'"
+    # Commands that don't use it leave it alone
+    rm -rf "$_rd"; ln -s "$T/elsewhere" "$_rd"
+    run version
+    check "version doesn't touch it" test -L "$_rd"
 }
 
 test_main_address() {
@@ -940,7 +984,7 @@ for c in update main_address pairing_info sessions_kept boot_fix kit exposure en
     healthy ssh_off_then_on flag_but_not_running running_but_off_next_boot locked_out_then_password \
     no_keys_no_password messy_key_file loose_home add_key restore legacy_dropbear host_fingerprints \
     failsafe_and_telnet pairing pairing_wrong_codes pairing_screen_closed servers port_taken port_change \
-    password keys_only keepalive_and_reset settings_not_applied_and_boot logins host_keys telnet key_edit report; do
+    password keys_only keepalive_and_reset settings_not_applied_and_boot logins host_keys telnet key_edit report run_dir_safe; do
     t "$c" "test_$c"
 done
 

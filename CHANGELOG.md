@@ -2,6 +2,20 @@
 
 All notable changes to LG webOS SSH Doctor.  Versions follow [semantic versioning](https://semver.org/).
 
+## [0.5.1] - 2026-11-12
+
+A security review of the whole app, and fixes for what it found.  None of these were reported as used against anyone.
+
+### Security
+
+- **Its working folder in `/tmp` is kept root-only.**  `/tmp` is shared with every program on the TV, and the script runs, mounts and copies files from `/tmp/ssh-doctor` as root: the copy of `/etc/shadow` that sets your password, keys waiting to be added, and the copy of itself that runs an update.  Another program on the TV that got there first (with a link or a folder of its own) could have swapped those files and become root, or added its own key.  Each run now makes sure it's a real folder owned by root that nobody else can open, and moves anything else out of the way first.
+- **The pairing page only answers your home network, by the TV's address.**  It listens on IPv4 only, refuses devices outside private and VPN address ranges, answers only when opened by an IP address, `localhost` or a `.local` name (a website can't reach it through a DNS name it controls, called DNS rebinding), refuses requests sent by another site's page, and drops slow or idle connections.  The code was still needed for anything, but a web page could have used up its tries.
+- **Updates only install this app's own download for exactly the offered version,** over HTTPS only.  Before, a manifest could point at any of this repository's releases, so a tampered one could have offered an older release as a newer one.  The answer is checked again before it goes to the Homebrew Channel.
+- **The router check only follows the router that answered.**  Any device on the network can answer the router search, and could have sent the TV's requests to another machine or to the TV itself.  Answers are size-capped too.
+- **Password hashes are limited to 999,999 rounds,** so one sent from the pairing page can't make every login take minutes.
+- The release workflow uses exact commits of its GitHub Actions and an exact version of the webOS packaging tool, and no workflow keeps the GitHub token in the checked-out repository.
+- [SECURITY.md](SECURITY.md) says all of this, and has a new section on what it can't protect against.
+
 ## [0.5.0] - 2026-11-12
 
 ### Added

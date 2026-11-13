@@ -44,7 +44,7 @@ var ALIVE_MS = 30 * 1000;
 
 var INFO = { purpose: 'key', port: 22, legacyRsa: false, hostKeys: [] };
 try { INFO = JSON.parse(fs.readFileSync(DIR + '/info.json', 'utf8')); } catch (e) { /* the defaults */ }
-var HASH_RE = /^\$6\$(rounds=[0-9]{4,9}\$)?[.\/0-9A-Za-z]{1,16}\$[.\/0-9A-Za-z]{86}$/;
+var HASH_RE = /^\$6\$(rounds=[0-9]{4,6}\$)?[.\/0-9A-Za-z]{1,16}\$[.\/0-9A-Za-z]{86}$/;
 
 var state = { state: 'starting', purpose: INFO.purpose, code: '', port: 0, ips: IPS, expires: 0, triesLeft: TRIES, key: null, password: false };
 var codesLeft = MAX_CODES;
@@ -246,9 +246,26 @@ function query(url) {
     return q;
 }
 
+// Only answer devices on the home network (IPv4: the page listens on IPv4
+// only, so a TV with a public IPv6 address isn't reachable from outside),
+// and only to the TV's address typed or scanned as is: an IP address,
+// localhost or a .local name.  A web page somewhere else can't reach this
+// through a DNS name it controls (DNS rebinding), and a page from another
+// site can't post to the API (its Origin wouldn't match).
+function hostOk(req) {
+    // And only from the home network
+    var from = String(req.socket.remoteAddress || '').replace(/^::ffff:/, '');
+    if (!/^(10|127)\.|^192\.168\.|^172\.(1[6-9]|2[0-9]|3[01])\.|^169\.254\.|^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\./.test(from)) { return false; }
+    var h = String(req.headers.host || '');
+    if (!/^(\[[0-9A-Fa-f:.]+\]|[0-9.]+|localhost|[A-Za-z0-9-]+\.local)(:[0-9]+)?$/.test(h)) { return false; }
+    var o = req.headers.origin;
+    return o === undefined || o === 'http://' + h;
+}
+
 function handle(req, res) {
     var url = req.url || '/';
     var p = url.split('?')[0];
+    if (!hostOk(req)) { return send(res, 403, 'text/plain', 'Open this page by the TV\'s address.'); }
     if (req.method === 'GET' && FILES[p]) {
         var f = FILES[p];
         fs.readFile(path.join(HERE, f[0]), function (err, data) {
@@ -293,12 +310,15 @@ function tick() {
 
 function listen(port, triesLeft) {
     server = http.createServer(handle);
+    // Slow or idle connections don't tie it up
+    server.setTimeout(20000);
+    server.maxConnections = 64;
     server.on('error', function (e) {
         if (e.code === 'EADDRINUSE' && triesLeft > 0) { return listen(port + 1, triesLeft - 1); }
         console.error('Could not listen: ' + e.message);
         process.exit(1);
     });
-    server.listen(port, function () {
+    server.listen(port, '0.0.0.0', function () {
         state.port = port;
         state.state = 'waiting';
         state.code = newCode();

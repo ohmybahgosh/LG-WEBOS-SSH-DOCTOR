@@ -8,13 +8,15 @@
 var http = require('http');
 var fs = require('fs');
 var V = process.argv[2];
+// FAKE_IPK_URL or FAKE_IPK_V: a manifest that points somewhere it shouldn't
+var IV = process.env.FAKE_IPK_V || V;
 var s = http.createServer(function (req, res) {
     if (req.url === '/rel/latest/download/org.ohmybahgosh.sshdoctor.manifest.json') {
         res.writeHead(302, { Location: '/files/manifest.json' }); res.end(); return;
     }
     if (req.url === '/files/manifest.json') {
         res.end(JSON.stringify({ id: 'org.ohmybahgosh.sshdoctor', version: V,
-            ipkUrl: 'http://127.0.0.1:' + s.address().port + '/files/sd_' + V + '.ipk',
+            ipkUrl: process.env.FAKE_IPK_URL || 'http://127.0.0.1:' + s.address().port + '/rel/download/v' + IV + '/org.ohmybahgosh.sshdoctor_' + IV + '_all.ipk',
             ipkHash: { sha256: 'ab'.repeat(32) } }));
         return;
     }

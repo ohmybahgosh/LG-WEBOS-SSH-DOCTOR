@@ -54,7 +54,7 @@
 #
 # Paths can be moved under SD_ROOT for the tests.
 
-VERSION="0.5.0"
+VERSION="0.5.1"
 R="${SD_ROOT:-}"
 HERE=$(cd "$(dirname "$0")" && pwd)
 
@@ -134,6 +134,33 @@ jsl() {
 }
 
 stamp() { date +%Y%m%d-%H%M%S; }
+
+# Who owns a file, as a number
+# shellcheck disable=SC2012,SC2317
+owner_of() { ls -ldn "$1" 2>/dev/null | awk 'NR == 1 { print $3 }'; }
+
+# $RUN is in /tmp, which every program on the TV can write to.  The script
+# runs, mounts and copies files from there as root, so it has to be a real
+# folder that this user owns and nobody else can write to.  Anything else
+# there (a link, a file, someone else's folder) is moved out of the way.
+secure_run() {
+    _me=$(id -u)
+    _try=0
+    while [ $_try -lt 3 ]; do
+        _try=$((_try + 1))
+        if [ -L "$RUN" ] || { [ -e "$RUN" ] && [ ! -d "$RUN" ]; }; then
+            rm -f "$RUN" 2>/dev/null
+        elif [ -d "$RUN" ] && [ "$(owner_of "$RUN")" != "$_me" ]; then
+            mv "$RUN" "$RUN.not-ours.$$" 2>/dev/null
+        fi
+        [ -e "$RUN" ] || [ -L "$RUN" ] || { mkdir -p "${RUN%/*}" && mkdir -m 700 "$RUN"; } 2>/dev/null
+        if [ -d "$RUN" ] && [ ! -L "$RUN" ] && [ "$(owner_of "$RUN")" = "$_me" ]; then
+            chmod 700 "$RUN"
+            return 0
+        fi
+    done
+    die "$RUN isn't safe to use: another program put something there.  Restart the TV and try again."
+}
 
 find_node() {
     [ -n "$NODE" ] && { say "$NODE"; return; }
@@ -1163,7 +1190,7 @@ restore() {
 # itself never reaches this script)
 set_password() {
     # shellcheck disable=SC2016
-    printf '%s' "$1" | grep -Eq '^\$6\$(rounds=[0-9]{4,9}\$)?[./0-9A-Za-z]{1,16}\$[./0-9A-Za-z]{86}$' ||
+    printf '%s' "$1" | grep -Eq '^\$6\$(rounds=[0-9]{4,6}\$)?[./0-9A-Za-z]{1,16}\$[./0-9A-Za-z]{86}$' ||
         die "That isn't a password hash this script takes."
     mkdir -p "$SDDIR" && chmod 700 "$SDDIR"
     printf '%s\n' "$1" > "$PWHASH.tmp" && chmod 600 "$PWHASH.tmp" && mv "$PWHASH.tmp" "$PWHASH"
@@ -1389,7 +1416,7 @@ kit_restore() {
     if [ -f "$_k/root.hash" ]; then
         _ph=$(awk 'NR == 1' "$_k/root.hash")
         # shellcheck disable=SC2016
-        if printf '%s' "$_ph" | grep -Eq '^\$6\$(rounds=[0-9]{4,9}\$)?[./0-9A-Za-z]{1,16}\$[./0-9A-Za-z]{86}$'; then
+        if printf '%s' "$_ph" | grep -Eq '^\$6\$(rounds=[0-9]{4,6}\$)?[./0-9A-Za-z]{1,16}\$[./0-9A-Za-z]{86}$'; then
             mkdir -p "$SDDIR" && chmod 700 "$SDDIR"
             printf '%s\n' "$_ph" > "$PWHASH.tmp" && chmod 600 "$PWHASH.tmp" && mv "$PWHASH.tmp" "$PWHASH"
             say "Put back your own password."
@@ -1488,9 +1515,19 @@ update_check() {
     fi
 }
 
+# The last check's answer is what goes to the Homebrew Channel: an address
+# with no quotes or spaces, a SHA-256 and a version number, nothing else
+upd_valid() {
+    _vu=$(upd_get ipkUrl); _vh=$(upd_get sha256); _vv=$(upd_get latest)
+    case "$_vu" in https://*|http://127.0.0.1:*) ;; *) return 1 ;; esac
+    case "$_vu" in *[!A-Za-z0-9:/._-]*) return 1 ;; esac
+    printf '%s' "$_vh" | grep -Eq '^[0-9a-f]{64}$' || return 1
+    printf '%s' "$_vv" | grep -Eq '^[0-9]+(\.[0-9]+)+$' || return 1
+}
+
 update_install() {
     grep -q '"newer":true' "$UPD/check.json" 2>/dev/null || die '{"error":"nothing-newer"}'
-    if [ -z "$(upd_get ipkUrl)" ] || [ -z "$(upd_get sha256)" ]; then die '{"error":"bad-check"}'; fi
+    upd_valid || die '{"error":"bad-check"}'
     cp "$HERE/ssh-doctor.sh" "$UPD/run.sh"
     upd_state starting "$(upd_get latest)"
     if command -v setsid >/dev/null 2>&1; then
@@ -1502,6 +1539,7 @@ update_install() {
 }
 
 update_run() {
+    upd_valid || { upd_state failed '' bad-check; return 1; }
     _u=$(upd_get ipkUrl); _h=$(upd_get sha256); _v=$(upd_get latest)
     upd_state installing "$_v"
     # The Homebrew Channel downloads it, checks the SHA-256 and installs it,
@@ -1784,9 +1822,13 @@ pair_reject() {
 
 CMD=${1:-status}
 [ $# -gt 0 ] && shift
-mkdir -p "$RUN" 2>/dev/null
-# This run's scratch files, even if it stops early
-trap 'rm -f "$RUN"/*."$$" "$RUN"/*."$$".tmp 2>/dev/null' EXIT
+case "$CMD" in
+    -h|--help|help|version|changes) ;;
+    *)
+        secure_run
+        # This run's scratch files, even if it stops early
+        trap 'rm -f "$RUN"/*."$$" "$RUN"/*."$$".tmp 2>/dev/null' EXIT ;;
+esac
 case "$CMD" in
     status) if [ "${1:-}" = --json ]; then status_json; else status_text; fi ;;
     ssh-on) ssh_on ;;
