@@ -26,6 +26,7 @@ So you can judge it yourself:
 
 - **Fix SSH at startup,** when you turn it on, starts the Homebrew Channel's `dropbear` after a restart if it didn't come up, and fixes the keys file's permissions.  It writes what it did to `/var/lib/webosbrew/ssh-doctor/boot.last`.
 - **Reachable from the internet?** talks to your router on your home network only: an SSDP search, then UPnP requests for its list of port forwards.  It only follows a description and control address on the home network device that answered the search, over plain HTTP, and reads at most 256 KB of each answer, so another device on the network can't send the TV elsewhere.  **Close it on the router** asks the router to remove the forwards that lead to the TV's SSH or telnet ports, and nothing else.
+- **Updates** only install a release whose manifest is signed with the project's release key (below).  The private half is kept off the repository: only the maintainer has it, and GitHub Actions uses it, from an encrypted secret, to sign each release.  So a release or manifest put up by anyone else, or changed after it was signed, isn't installed.  The app checks it with Ed25519 (tweetnacl).
 - **Updates** ask GitHub (github.com and api.github.com) for this repository's latest release: its Homebrew Channel manifest and release notes.  Only the IPK at this repository's own release address for exactly that version is installed (so a manifest can't point at another file or offer an older release as a newer one), over HTTPS only, through the Homebrew Channel, which checks it against the SHA-256 in that manifest before installing.  Nothing installs unless you press OK.
 - **Save or restore my setup** writes to a USB drive you plugged in (`/tmp/usb`): your keys file, the TV's own SSH host keys (private keys), your settings and your password's hash.  Anyone with that drive could pretend to be your TV to computers that trust it, so keep it safe.  Putting it back keeps a backup of everything it replaces, and a different port is tried like a port change.
 
@@ -35,14 +36,27 @@ It downloads nothing except an update you choose, opens no ports except the pair
 
 ## Known limits
 
-- The SHA-256 an update is checked against comes from the same GitHub release as the IPK.  It catches a damaged or swapped download, not a release published by someone who took over the GitHub account behind this repository.  Releases are only made from tagged commits by GitHub Actions, with the actions pinned to exact versions.
+- Releases are signed by GitHub Actions, so someone who took over the GitHub account behind this repository could change the release workflow and have it sign their own release.  Uploading a file to a release or editing its manifest by hand isn't enough, and the actions the workflow uses are pinned to exact commits.
+- Versions before 0.5.2 check an update's SHA-256 but not its signature.
 - The Homebrew Channel's telnet lets anyone on your network in as root with no password while it's on.  SSH Doctor shows it, and **Turn telnet off** in More tools closes it once SSH works.
 - Anything that can already run commands as root on the TV can change SSH Doctor too.
 
 ## Verifying a download
 
-Every release has a `SHA256SUMS` file.  Download it next to the IPK and run:
+Every release from 0.5.2 on is signed with this key, in [minisign](https://jedisct1.github.io/minisign/)'s format:
+
+```
+RWQO4W70hCxwfBnkZTxsuXAwvARiUkxv0tgpXimn2LcrBFHoM5DsT9i3
+```
+
+Each file has a `.minisig` next to it.  Download both and run:
 
 ```sh
-sha256sum -c SHA256SUMS
+minisign -Vm org.ohmybahgosh.sshdoctor_0.5.2_all.ipk -P RWQO4W70hCxwfBnkZTxsuXAwvARiUkxv0tgpXimn2LcrBFHoM5DsT9i3
+```
+
+Every release also has a `SHA256SUMS` file (signed too).  Download it next to the IPK and run:
+
+```sh
+sha256sum -c --ignore-missing SHA256SUMS
 ```

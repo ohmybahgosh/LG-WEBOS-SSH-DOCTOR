@@ -1,8 +1,8 @@
 name: Release
 
 # Push a tag like v0.1.0 and this publishes a GitHub release with the TV app
-# (IPK), its Homebrew Channel manifest, the script and SHA256SUMS, after the
-# tests pass.
+# (IPK), its Homebrew Channel manifest, the script and SHA256SUMS, each signed
+# with the release key (.minisig), after the tests pass.
 
 on:
   push:
@@ -31,6 +31,8 @@ jobs:
           shellcheck -s sh ssh-doctor.sh
           sh tests/run.sh busybox
           node tests/check-i18n.js
+          sh webos-app/build.sh --no-package
+          node tests/check-signing.js .cache/tweetnacl-1.0.3-nacl-fast.min.js
       - name: Check the tag matches the script version
         run: |
           v=$(sed -n 's/^VERSION="\(.*\)"$/\1/p' ssh-doctor.sh)
@@ -41,7 +43,16 @@ jobs:
           sh webos-app/build.sh
           cp webos-app/out/*.ipk webos-app/out/*.manifest.json .
       - name: Build checksums
-        run: sha256sum ssh-doctor.sh *.ipk > SHA256SUMS
+        run: sha256sum ssh-doctor.sh *.ipk *.manifest.json > SHA256SUMS
+      # The app only installs an update whose manifest this key signed.  The
+      # private key is the RELEASE_SIGNING_KEY secret and never touches disk.
+      - name: Sign the release
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          [ -n "$RELEASE_SIGNING_KEY" ] || { echo "::error::No RELEASE_SIGNING_KEY secret: releases must be signed."; exit 1; }
+          node scripts/release-sign.js *.manifest.json *.ipk ssh-doctor.sh SHA256SUMS
+          [ "$(node scripts/release-sign.js --public-key)" = "$(sed -n "s/^var RELEASE_PUBKEY = '\(.*\)';$/\1/p" update.js)" ] || { echo "::error::The signing key isn't the one update.js trusts."; exit 1; }
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -50,6 +61,6 @@ jobs:
             $0 ~ "^## \\[?" v { on = 1; next }
             on && /^## / { exit }
             on { print }' CHANGELOG.md)
-          gh release create "$GITHUB_REF_NAME" ssh-doctor.sh *.ipk *.manifest.json SHA256SUMS \
+          gh release create "$GITHUB_REF_NAME" ssh-doctor.sh *.ipk *.manifest.json SHA256SUMS *.minisig \
             --title "LG webOS SSH Doctor $GITHUB_REF_NAME" \
             --notes "${notes:-See CHANGELOG.md}"

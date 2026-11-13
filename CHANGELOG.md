@@ -2,6 +2,16 @@
 
 All notable changes to LG webOS SSH Doctor.  Versions follow [semantic versioning](https://semver.org/).
 
+## [0.5.2] - 2026-11-12
+
+### Security
+
+- **Signed releases.**  Every release file now comes with a minisign signature (`.minisig`) by the project's release key, and the app only installs an update whose manifest that key signed.  A release put up by anyone else, or a manifest changed after it was signed, isn't installed, and the app says so.  The private key is kept out of the repository: GitHub Actions signs each release with it from an encrypted secret.  The public key, and how to check a download by hand, are in [SECURITY.md](SECURITY.md).
+- `SHA256SUMS` covers the manifest too.
+- `.gitignore` keeps key files out of the repository, and a test fails if a private key ever lands in it.
+
+TVs on 0.5.1 or older update to this one without checking a signature.  From this version on, every update is checked.
+
 ## [0.5.1] - 2026-11-12
 
 A security review of the whole app, and fixes for what it found.  None of these were reported as used against anyone.

@@ -844,6 +844,10 @@
         runScript('update-check', function (ok, out) {
             busy = false;
             var u = parse(out);
+            if (u && (u.error === 'bad-signature' || u.error === 'unexpected-url')) {
+                message(T('Updates'), p(esc(T('The newest release on GitHub isn\'t signed with SSH Doctor\'s release key, so it wasn\'t installed.  Please report this on GitHub.'))));
+                return;
+            }
             if (!u || u.error || !u.latest) { message(T('Updates'), p(esc(T('GitHub couldn\'t be reached, so there\'s no answer.  Check the TV\'s internet connection and try again.')))); return; }
             if (!u.newer) { message(T('Updates'), p(esc(T('You have the newest version, v{v}.', { v: u.current })))); refresh(); return; }
             confirmThen(T('Update to v{v}', { v: u.latest }),

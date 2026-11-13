@@ -551,7 +551,7 @@ test_report() {
     flag_on; sshd_up; cat "$T/k_ed.pub" > "$(AK)"; chmod 600 "$(AK)"
     echo "2026-11-08T02:00:00.1Z [1.0] authpriv.notice dropbear[101] Password auth succeeded for 'root' from 192.168.1.11:5001" > "$T/log/legacy-log"
     run report
-    check "has versions" has "SSH Doctor 0.5.1"
+    check "has versions" has "SSH Doctor 0.5.2"
     check "has findings line" has "Findings:"
     check "no IP addresses" sh -c "! printf '%s' '$OUT' | grep -Eq '([0-9]{1,3}\.){3}[0-9]{1,3}'"
     check "no key fingerprints" lacks "SHA256:"
@@ -882,11 +882,12 @@ release_start() {
     node "$HERE/fakebin/fake-release.js" "$1" "$T/rel.ready" > /dev/null 2>&1 &
     REL_PID=$!
     _i=0; while [ ! -s "$T/rel.ready" ] && [ $_i -lt 50 ]; do sleep 0.1; _i=$((_i + 1)); done
-    SD_RELEASE_BASE="http://127.0.0.1:$(cat "$T/rel.ready")/rel"
-    SD_API_BASE="http://127.0.0.1:$(cat "$T/rel.ready")/api"
-    export SD_RELEASE_BASE SD_API_BASE SD_LUNA="$HERE/fakebin/luna-send" FAKE_LUNA_LOG="$T/luna.log"
+    read -r _rp SD_RELEASE_PUBKEY < "$T/rel.ready"
+    SD_RELEASE_BASE="http://127.0.0.1:$_rp/rel"
+    SD_API_BASE="http://127.0.0.1:$_rp/api"
+    export SD_RELEASE_BASE SD_API_BASE SD_RELEASE_PUBKEY SD_LUNA="$HERE/fakebin/luna-send" FAKE_LUNA_LOG="$T/luna.log"
 }
-release_stop() { [ -n "$REL_PID" ] && kill "$REL_PID" 2>/dev/null; REL_PID=''; unset SD_RELEASE_BASE SD_API_BASE SD_LUNA FAKE_LUNA_LOG FAKE_LUNA_FAIL; }
+release_stop() { [ -n "$REL_PID" ] && kill "$REL_PID" 2>/dev/null; REL_PID=''; unset SD_RELEASE_BASE SD_API_BASE SD_RELEASE_PUBKEY SD_LUNA FAKE_LUNA_LOG FAKE_LUNA_FAIL; }
 upd_wait() { _i=0; while [ $_i -lt 50 ]; do grep -q "\"state\":\"$1\"" "$SD_ROOT/tmp/ssh-doctor/update/state.json" 2>/dev/null && return 0; sleep 0.2; _i=$((_i + 1)); done; return 1; }
 
 test_update() {
@@ -920,6 +921,18 @@ test_update() {
     run update-install
     check "install refused" is "$RC" 1
     release_stop
+    # Not signed by the release key, or changed after it was signed: not installed
+    for _bad in none other-key tampered; do
+        rm -f "$SD_ROOT/tmp/ssh-doctor/update/check.json"
+        export FAKE_SIG=$_bad
+        release_start 9.9.9
+        run update-check
+        check "signature $_bad: refused" has bad-signature
+        run update-install
+        check "signature $_bad: nothing installed" is "$RC" 1
+        release_stop
+        unset FAKE_SIG
+    done
     # A manifest pointing at another file, or at an older release, isn't installed
     for _bad in FAKE_IPK_URL=https://evil.example/org.ohmybahgosh.sshdoctor_9.9.9_all.ipk FAKE_IPK_V=0.1.0; do
         rm -f "$SD_ROOT/tmp/ssh-doctor/update/check.json"
