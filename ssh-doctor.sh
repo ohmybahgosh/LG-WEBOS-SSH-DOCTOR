@@ -135,14 +135,11 @@ jsl() {
 
 stamp() { date +%Y%m%d-%H%M%S; }
 
-# Who owns a file, as a number
-# shellcheck disable=SC2012,SC2317
-owner_of() { ls -ldn "$1" 2>/dev/null | awk 'NR == 1 { print $3 }'; }
-
 # $RUN is in /tmp, which every program on the TV can write to.  The script
 # runs, mounts and copies files from there as root, so it has to be a real
-# folder that this user owns and nobody else can write to.  Anything else
-# there (a link, a file, someone else's folder) is moved out of the way.
+# folder that this user owns (owner_of, below) and nobody else can write
+# to.  Anything else there (a link, a file, someone else's folder) is moved
+# out of the way.
 secure_run() {
     _me=$(id -u)
     _try=0
