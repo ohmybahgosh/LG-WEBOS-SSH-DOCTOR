@@ -7,8 +7,8 @@
 [![CI](https://github.com/ohmybahgosh/LG-WEBOS-SSH-DOCTOR/actions/workflows/ci.yml/badge.svg)](https://github.com/ohmybahgosh/LG-WEBOS-SSH-DOCTOR/actions/workflows/ci.yml)
 [![Release](https://ohmybahgosh.dev/badges/ssh-doctor-release.svg)](https://github.com/ohmybahgosh/LG-WEBOS-SSH-DOCTOR/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-[![Homebrew Channel](https://img.shields.io/badge/Homebrew%20Channel-ohmybahgosh.dev%2Frepo-3ddc97)](https://ohmybahgosh.dev/ssh-doctor/#homebrew)
-[![Project page](https://img.shields.io/badge/ohmybahgosh.dev-project%20page-3ddc97)](https://ohmybahgosh.dev/ssh-doctor/)
+[![Homebrew Channel](https://img.shields.io/badge/Homebrew%20Channel-ohmybahgosh.dev%2Frepo-2dd4bf)](https://ohmybahgosh.dev/ssh-doctor/#homebrew)
+[![Project page](https://img.shields.io/badge/ohmybahgosh.dev-project%20page-2dd4bf)](https://ohmybahgosh.dev/ssh-doctor/)
 
 </div>
 
