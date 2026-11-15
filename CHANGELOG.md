@@ -2,6 +2,12 @@
 
 All notable changes to LG webOS SSH Doctor.  Versions follow [semantic versioning](https://semver.org/).
 
+## [0.5.3] - 2026-11-14
+
+### Changed
+
+- **A new icon** in the family style of LG-USB-2-ETH0: `#ssh` with a heartbeat for its cursor, on the same dark background.  It's in the app list, the Homebrew Channel and the app's own header.
+
 ## [0.5.2] - 2026-11-12
 
 ### Security
