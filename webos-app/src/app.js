@@ -14,7 +14,7 @@
     var TS = I18N ? I18N.TS : function (t) { return t; };
 
     var HBC_EXEC = 'luna://org.webosbrew.hbchannel.service/exec';
-    var KEY = { UP: 38, DOWN: 40, ENTER: 13, BACK: 461, ESC: 27, BACKSPACE: 8 };
+    var KEY = { UP: 38, DOWN: 40, LEFT: 37, RIGHT: 39, ENTER: 13, BACK: 461, ESC: 27, BACKSPACE: 8 };
     var appDir = decodeURIComponent(window.location.pathname).replace(/\/[^\/]*$/, '');
     var SCRIPT = appDir + '/assets/ssh-doctor.sh';
 
@@ -91,16 +91,16 @@
         'perms': 'Other users can change the keys file or a folder above it, so the SSH server ignores the keys.  Fix my keys file sets the right permissions.',
         'password-default': 'Anyone on your network can log in with the default password, alpine.  Set up a key to turn that off.',
         'telnet-off': 'Telnet is off, so if SSH breaks, this app is the only way back in.',
-        'port-taken': 'Another program already uses the SSH port, so the Homebrew Channel\'s SSH server can\'t start there.  More tools, SSH servers on this TV shows which one.',
+        'port-taken': 'Another program already uses the SSH port, so the Homebrew Channel\'s SSH server can\'t start there.  Tools, SSH servers on this TV shows which one.',
         'keys-only-no-keys': 'Keys only is on, but no key works, so nobody can log in.  Set up a key, or go back to password login.',
         'hostkey-broken': 'One of the TV\'s own SSH keys is an empty file, which can stop SSH from starting.  Repair the TV\'s SSH keys fixes that.',
         'settings-not-applied': 'SSH isn\'t running with your settings (it was restarted another way).  Put my settings back fixes that.',
-        'port-trial': 'SSH answers on two ports while you try the new one.  Log in on it, then keep it in SSH settings.',
-        'failed-logins': 'Someone tried wrong passwords or user names recently.  More tools, Login history shows where from.',
+        'port-trial': 'SSH answers on two ports while you try the new one.  Log in on it, then keep it in Settings, SSH port.',
+        'failed-logins': 'Someone tried wrong passwords or user names recently.  Tools, Login history shows where from.',
         'other-ssh': 'Another SSH server runs on this TV too.  This app only changes the Homebrew Channel\'s.',
         'ssh-is-entware': 'SSH on this TV is Entware\'s, not the Homebrew Channel\'s.  This app checks it and fixes the keys file it reads, but leaves its settings alone.',
         'entware-no-way-in': 'Nobody can log in to Entware\'s SSH: there\'s no working key, and it won\'t take a password for root (Entware keeps its own, in /opt/etc/shadow).  Set up a key: Entware\'s SSH reads the same keys file.',
-        'sshd-config-bad': 'Entware\'s OpenSSH refuses its settings file, /opt/etc/ssh/sshd_config, so it won\'t start.  More tools, SSH servers on this TV shows what it says is wrong.',
+        'sshd-config-bad': 'Entware\'s OpenSSH refuses its settings file, /opt/etc/ssh/sshd_config, so it won\'t start.  Tools, SSH servers on this TV shows what it says is wrong.',
         'sshd-root-denied': 'Entware\'s OpenSSH doesn\'t let root log in (PermitRootLogin in /opt/etc/ssh/sshd_config).  Set it to prohibit-password to log in with keys.',
         'sshd-keyfile-elsewhere': 'Entware\'s OpenSSH reads keys from somewhere other than /home/root/.ssh/authorized_keys (AuthorizedKeysFile), so keys added here don\'t work there.',
         'sshd-hostkey-broken': 'Entware\'s OpenSSH has a missing or empty host key in /opt/etc/ssh, so it won\'t start.  Over telnet, ssh-keygen -A makes new ones.',
@@ -209,8 +209,14 @@
             return '<li class="' + (x.level === 'tip' ? 'tip' : '') + '">' + esc(T(FINDINGS[x.code] || x.code)) + '</li>';
         }).join('')
             // A quiet pointer to Entware, only when there's room and it isn't installed
-            + (s.entwareInstalled === false && f.length <= 1 ? '<li class="tip extra">' + esc(T('Want more from SSH?  Entware adds bash, tmux, nano and hundreds of Linux tools.  More tools, Get more from SSH.')) + '</li>' : '');
-        $('status').className = 'card' + (f.length > 2 ? ' compact' : '');
+            + (s.entwareInstalled === false && f.length <= 1 ? '<li class="tip extra">' + esc(T('Want more from SSH?  Entware adds bash, tmux, nano and hundreds of Linux tools.  More, Get more from SSH.')) + '</li>' : '');
+        // The card keeps its size: with more to say (or a longer language)
+        // its text steps down until everything fits
+        var card = $('status'), steps = ['', ' compact', ' compact tight', ' compact tight tighter'];
+        for (var cs = f.length > 2 ? 1 : 0; cs < steps.length; cs++) {
+            card.className = 'card' + steps[cs];
+            if (card.scrollHeight <= card.clientHeight + 1) { break; }
+        }
 
         show('sshon', find('ssh-off') || find('ssh-not-running') || find('ssh-off-next-boot'));
         show('fixkeys', find('keys-private') || find('keys-fixable') || find('keys-bad') || find('perms') || find('no-way-in'));
@@ -220,11 +226,32 @@
         show('update', find('update-available'));
         if (s.update && s.update.newer) { $('update-label').textContent = T('Update to v{v}', { v: s.update.latest }); }
         show('password', find('no-way-in') || find('no-password') || find('keys-only-no-keys'));
-        $('settings-hint').textContent = settingsHint();
         $('keys-hint').textContent = s.keys === 1 ? T('1 key') : T('{n} keys', { n: s.keys || 0 });
-        var n = buttons().length;
-        $('actions').className = 'actions' + (n >= 8 ? ' tighter' : (n >= 7 ? ' tight' : ''));
+        renderRows();
+        fitRows();
         if (!overlayMode) { focusCurrent(); }
+    }
+
+    // The Settings, Tools and More rows: their hints, and the switches for
+    // settings that are on or off
+    function tog(id, on) { $('tog-' + id).className = 'tog' + (on ? ' on' : ''); }
+    function renderRows() {
+        var s = state || {}, st = sset();
+        $('setpw-hint').textContent = st.password ? T('set') : (s.password === 'alpine' ? T('not set, alpine works') : T('not set'));
+        tog('keysonly', st.keysOnly);
+        $('port-hint').textContent = st.trial ? T('{port}, and {old} for now', { port: st.port, old: st.trial }) : String(st.port || 22);
+        tog('keepalive', st.keepalive);
+        tog('bootfix', st.bootFix);
+        show('reset', st.password || st.keysOnly || st.keepalive || st.bootFix || (st.port && st.port !== 22) || st.trial);
+        $('logins-hint').textContent = s.failedLogins ? T('{n} failed tries lately', { n: s.failedLogins }) : T('who logged in, and from where');
+        $('telnet-hint').textContent = s.telnetRunning ? T('on, no password') : T('off');
+        tog('telnet', s.telnetRunning);
+        $('sftp-hint').textContent = s.sftp ? T('works') : T('missing');
+        $('exposure-hint').textContent = exposureHint();
+        $('servers-hint').textContent = T('{n} found', { n: (s.servers || []).length });
+        $('updates-hint').textContent = s.update && s.update.newer ? T('v{v} is out', { v: s.update.latest }) : T('this is v{v}', { v: s.version });
+        show('entware', s.entwareInstalled === false);
+        show('restore', backups.length > 0);
     }
 
     function show(action, on) {
@@ -572,29 +599,6 @@
 
     // ------------------------------------------------------------------ SSH settings
 
-    function settingsHint() {
-        var st = sset(), bits = [];
-        if (st.port && st.port !== 22) { bits.push(T('port {port}', { port: st.port })); }
-        if (st.password) { bits.push(T('own password')); }
-        if (st.keysOnly) { bits.push(T('keys only')); }
-        if (st.keepalive) { bits.push(T('keepalive')); }
-        if (st.bootFix) { bits.push(T('fixed at startup')); }
-        return bits.length ? bits.join(', ') : T('Homebrew Channel defaults');
-    }
-
-    function settingsMenu(keep) {
-        var st = sset(), s = state || {};
-        var custom = st.password || st.keysOnly || st.keepalive || st.bootFix || (st.port && st.port !== 22) || st.trial;
-        menu(T('SSH settings'), [
-            { label: T('Your own password'), hint: st.password ? T('set') : (s.password === 'alpine' ? T('not set, alpine works') : T('not set')), fn: passwordMenu },
-            { label: T('Keys only'), hint: st.keysOnly ? T('on: passwords don\'t log in') : T('off'), fn: keysOnlyToggle },
-            { label: T('SSH port'), hint: st.trial ? T('{port}, and {old} for now', { port: st.port, old: st.trial }) : String(st.port || 22), fn: portMenu, fix: !!st.trial },
-            { label: T('Keep idle sessions connected'), hint: st.keepalive ? T('on') : T('off'), fn: keepaliveToggle },
-            { label: T('Fix SSH at startup'), hint: st.bootFix ? T('on') : T('off'), fn: bootFixToggle },
-            custom ? { label: T('Reset to Homebrew Channel defaults'), hint: T('port 22, its usual password rules'), fn: resetSettings } : null
-        ], keep);
-    }
-
     function passwordMenu() {
         var st = sset();
         menu(T('Your own password'), [
@@ -741,24 +745,6 @@
     }
 
     // ------------------------------------------------------------------ more tools
-
-    function toolsMenu() {
-        var s = state || {};
-        menu(T('More tools'), [
-            { label: T('Login history'), hint: s.failedLogins ? T('{n} failed tries lately', { n: s.failedLogins }) : T('who logged in, and from where'), fn: loginHistory },
-            { label: T('This TV\'s SSH keys'), hint: T('fingerprints, or make new ones'), fn: hostKeysMenu },
-            { label: T('Telnet'), hint: s.telnetRunning ? T('on, no password') : T('off'), fn: telnetToggle },
-            { label: T('File transfer (SFTP)'), hint: s.sftp ? T('works') : T('missing'), fn: sftpInfo },
-            { label: T('SSH servers on this TV'), hint: T('{n} found', { n: (s.servers || []).length }), fn: serversInfo },
-            { label: T('Reachable from the internet?'), hint: exposureHint(), fn: exposureInfo, fix: find('ssh-exposed') || find('telnet-exposed') },
-            { label: T('Save or restore my setup'), hint: T('on a USB drive, for after a reset'), fn: kitMenu },
-            { label: T('Updates'), hint: s.update && s.update.newer ? T('v{v} is out', { v: s.update.latest }) : T('this is v{v}', { v: s.version }), fn: updateFlow, fix: !!(s.update && s.update.newer) },
-            s.entwareInstalled === false ? { label: T('Get more from SSH'), hint: T('Entware: bash, tmux, nano and more'), fn: entwareInfo } : null,
-            { label: T('Report for getting help'), hint: T('no private details'), fn: reportShow },
-            backups.length ? { label: T('Undo a change'), hint: T('put a backup back'), fn: actions.restore } : null,
-            { label: T('Go back to password login'), hint: T('if you\'re locked out'), fn: actions.password }
-        ]);
-    }
 
     // ------------------------------------------------------------------ exposure
 
@@ -1079,8 +1065,23 @@
         pair: function () { startPair('key'); },
         howto: howTo,
         keys: function () { keysMenu(); },
-        settings: function () { settingsMenu(); },
-        tools: toolsMenu,
+        setpw: function () { passwordMenu(); },
+        keysonly: function () { keysOnlyToggle(); },
+        port: function () { portMenu(); },
+        keepalive: function () { keepaliveToggle(); },
+        bootfix: function () { bootFixToggle(); },
+        reset: function () { resetSettings(); },
+        logins: function () { loginHistory(); },
+        telnet: function () { telnetToggle(); },
+        sftp: function () { sftpInfo(); },
+        exposure: function () { exposureInfo(); },
+        hostkeys: function () { hostKeysMenu(); },
+        servers: function () { serversInfo(); },
+        kit: function () { kitMenu(); },
+        updates: function () { updateFlow(); },
+        entware: function () { entwareInfo(); },
+        report: function () { reportShow(); },
+        pwlogin: function () { actions.password(); },
         apply: function () { act(T('Put my settings back'), 'apply', p(esc(T('SSH runs with your settings again.')))); },
         exposed: closeExposure,
         update: updateFlow,
@@ -1103,15 +1104,98 @@
 
     // ------------------------------------------------------------------ remote
 
-    function buttons() {
-        return Array.prototype.slice.call(document.querySelectorAll('.btn')).filter(function (b) { return b.style.display !== 'none'; });
+    // The tabs over the rows, as in LG-USB-2-ETH0: only the open tab's rows
+    // show, a tab with no rows is hidden, and More gets a dot when an update
+    // is waiting there.
+    var TABS = ['ssh', 'settings', 'tools', 'more'];
+    // True while the focus is up on the tab bar (UP from a tab's first row)
+    var onTabs = false;
+    var tab = 'ssh';
+    function tabRows(t) {
+        return Array.prototype.slice.call(document.querySelectorAll('.btn[data-tab="' + t + '"]')).filter(function (b) {
+            return b.style.display !== 'none';
+        });
     }
+    function visibleTabs() { return TABS.filter(function (t) { return tabRows(t).length > 0; }); }
+    function fitRows() {
+        var vis = visibleTabs();
+        if (vis.indexOf(tab) < 0) { tab = vis[0] || 'ssh'; }
+        Array.prototype.slice.call(document.querySelectorAll('.tab')).forEach(function (el) {
+            var t = el.getAttribute('data-tab');
+            var news = t === 'more' && tabRows('more').some(function (b) { return b.className.indexOf('btn-update') >= 0; });
+            el.className = 'tab' + (t === tab ? ' on' : '') + (news ? ' news' : '') + (vis.indexOf(t) < 0 ? ' gone' : '');
+        });
+        Array.prototype.slice.call(document.querySelectorAll('.btn')).forEach(function (b) {
+            b.className = b.className.replace(/ ?off-tab/g, '') + (b.getAttribute('data-tab') === tab ? '' : ' off-tab');
+        });
+        // Longer tab names (Spanish, Russian) step the tab text down to fit
+        var bar = $('tabs');
+        bar.className = 'tabs';
+        if (bar.scrollWidth > bar.clientWidth) { bar.className = 'tabs small'; }
+        if (bar.scrollWidth > bar.clientWidth) { bar.className = 'tabs smaller'; }
+    }
+    function openTab(t) {
+        tab = t;
+        current = 0;
+        fitRows();
+        focusCurrent();
+    }
+    function stepTab(dir) {
+        var vis = visibleTabs();
+        var i = vis.indexOf(tab) + dir;
+        if (i >= 0 && i < vis.length) { openTab(vis[i]); }
+    }
+
+    // Only the open tab's rows on screen, in order (hidden rows are skipped)
+    function buttons() { return tabRows(tab); }
     var current = 0;
     function focusCurrent() {
+        // On the tab bar the open tab's rows still get laid out (and the
+        // scroll rail updated), only the focus goes to the tab
+        var tabEl = onTabs ? document.querySelector('.tab[data-tab="' + tab + '"]') : null;
+        if (onTabs && !tabEl) { onTabs = false; }
         var list = buttons();
-        if (!list.length) { return; }
+        if (!list.length) {
+            $('rail').className = 'rail';
+            if (tabEl) { tabEl.focus(); }
+            return;
+        }
         if (current >= list.length) { current = list.length - 1; }
-        list[current].focus();
+        // Scroll the rows so the focused one shows whole, starting the view at
+        // a row's top edge (never half a row at the top)
+        var box = $('rows'), first = 0, used = 0;
+        for (var i = current; i >= 0; i--) {
+            used += list[i].offsetHeight + 14;
+            if (used - 14 > box.clientHeight) { break; }
+            first = i;
+        }
+        box.scrollTop = first > 0 ? list[first].offsetTop - list[0].offsetTop : 0;
+        // A row that doesn't fit whole is hidden, not cut off, and the rail
+        // says there's more above or below
+        var top = box.scrollTop, bottom = top + box.clientHeight, above = false, below = false;
+        var shown = 0, firstShown = -1;
+        for (var j = 0; j < list.length; j++) {
+            var rt = list[j].offsetTop - list[0].offsetTop, rb = rt + list[j].offsetHeight;
+            var whole = rt >= top - 1 && rb <= bottom + 1;
+            list[j].style.visibility = whole ? '' : 'hidden';
+            if (whole) { shown++; if (firstShown < 0) { firstShown = j; } }
+            if (!whole && rb <= top + 1) { above = true; }
+            if (!whole && rt >= top) { below = true; }
+        }
+        var rail = $('rail'), more = above || below;
+        rail.className = 'rail' + (more ? ' show' : '');
+        if (more) {
+            var last = list[firstShown + shown - 1];
+            var h = last.offsetTop - list[0].offsetTop + last.offsetHeight - top;
+            rail.style.top = (box.offsetTop + 22) + 'px';
+            rail.style.height = Math.max(h - 44, 60) + 'px';
+            var track = rail.clientHeight;
+            $('rail-thumb').style.height = Math.max(track * shown / list.length, 24) + 'px';
+            $('rail-thumb').style.top = (track * firstShown / list.length) + 'px';
+            rail.children[0].className = 'rail-cap up' + (above ? ' lit' : '');
+            rail.children[2].className = 'rail-cap down' + (below ? ' lit' : '');
+        }
+        if (tabEl) { tabEl.focus(); } else { list[current].focus({ preventScroll: true }); }
     }
     function exitApp() {
         if (pair) { endPair(); }
@@ -1148,8 +1232,20 @@
             return;
         }
         var list = buttons();
+        // Up on the tab bar: LEFT and RIGHT pick a tab, DOWN or OK go into it
+        if (onTabs) {
+            if (k === KEY.LEFT) { stepTab(-1); }
+            else if (k === KEY.RIGHT) { stepTab(1); }
+            else if (k === KEY.DOWN || k === KEY.ENTER) { onTabs = false; current = 0; focusCurrent(); }
+            else if (k === KEY.BACK || k === KEY.ESC) { exitApp(); }
+            e.preventDefault();
+            return;
+        }
         if (k === KEY.DOWN) { current = Math.min(current + 1, list.length - 1); focusCurrent(); e.preventDefault(); }
+        else if (k === KEY.UP && current === 0) { onTabs = true; focusCurrent(); e.preventDefault(); }
         else if (k === KEY.UP) { current = Math.max(current - 1, 0); focusCurrent(); e.preventDefault(); }
+        else if (k === KEY.LEFT) { stepTab(-1); e.preventDefault(); }
+        else if (k === KEY.RIGHT) { stepTab(1); e.preventDefault(); }
         else if (k === KEY.ENTER) {
             var btn = list[current];
             if (btn && !busy) { actions[btn.getAttribute('data-action')](); }
@@ -1159,11 +1255,15 @@
 
     // Magic Remote pointer
     Array.prototype.slice.call(document.querySelectorAll('.btn')).forEach(function (btn) {
-        btn.addEventListener('mouseover', function () { current = buttons().indexOf(btn); focusCurrent(); });
+        btn.addEventListener('mouseover', function () { onTabs = false; current = buttons().indexOf(btn); focusCurrent(); });
         btn.addEventListener('click', function () {
             current = buttons().indexOf(btn);
             if (!overlayMode && !busy) { actions[btn.getAttribute('data-action')](); }
         });
+    });
+    // Magic Remote pointer on the tabs
+    Array.prototype.slice.call(document.querySelectorAll('.tab')).forEach(function (el) {
+        el.addEventListener('click', function () { if (!overlayMode) { onTabs = true; openTab(el.getAttribute('data-tab')); } });
     });
     $('overlay').addEventListener('click', function (e) {
         if (overlayMode === 'input' || overlayMode === 'menu') { return; }
@@ -1185,9 +1285,12 @@
     try {
         if (window.sessionStorage.getItem('sd.focus') === 'lang') {
             window.sessionStorage.removeItem('sd.focus');
+            tab = 'more';
+            fitRows();
             current = buttons().indexOf(document.querySelector('[data-action="lang"]'));
         }
     } catch (e) { /* first row */ }
+    fitRows();
     focusCurrent();
     refresh();
 }());

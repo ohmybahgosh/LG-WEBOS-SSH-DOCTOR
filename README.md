@@ -54,6 +54,8 @@ These are the common ways SSH breaks on a rooted LG TV, and none of them needs a
 
 ![The check, on a TV whose keys file needs fixing](assets/screenshots/tv-messy.png)
 
+The screen is laid out like [LG-USB-2-ETH0](https://github.com/ohmybahgosh/LG-USB-2-ETH0)'s: the check on the left, and four tabs on the right, **SSH**, **Settings**, **Tools** and **More**, picked with LEFT and RIGHT on the remote.  Settings that are on or off are switches, and a tab with more rows than fit scrolls with the focus.
+
 **Repair, one button each.**  Each says what it will change, keeps a dated backup, and can be undone with **Undo a change**:
 
 - **Turn SSH on now,** without the reboot the Homebrew Channel toggle needs
@@ -72,7 +74,7 @@ The pairing page only runs while that screen is open.  It closes after one key, 
 
 <p><img src="assets/screenshots/tv-pair.png" width="70%" alt="The TV's pairing screen: a QR code, the address and the code K7F-3QX"> <img src="assets/screenshots/pair-phone.png" width="24%" alt="The pairing page on a phone: make a key, or send one you have"></p>
 
-**SSH settings.**  dropbear has no settings file: its options are set when it starts, and the Homebrew Channel starts it with none.  SSH Doctor keeps your settings in `/var/lib/webosbrew/ssh-doctor` and adds a small startup script to `/var/lib/webosbrew/init.d` (the Homebrew Channel runs those after it starts SSH), which restarts dropbear with them after every reboot.  Open sessions stay connected while it does.
+**Settings.**  dropbear has no settings file: its options are set when it starts, and the Homebrew Channel starts it with none.  SSH Doctor keeps your settings in `/var/lib/webosbrew/ssh-doctor` and adds a small startup script to `/var/lib/webosbrew/init.d` (the Homebrew Channel runs those after it starts SSH), which restarts dropbear with them after every reboot.  Open sessions stay connected while it does.
 
 - **Your own password,** typed on the TV with the on-screen keyboard, or on your phone or computer through the pairing page.  Either way it's turned into a SHA-512 crypt hash first (the `$6$` kind `/etc/shadow` uses), so the password itself is never sent over your network or saved on the TV.  It's applied the way the Homebrew Channel applies `alpine`: a bind-mounted copy of `/etc/shadow`, so the system partition isn't touched.
 - **Keys only:** passwords stop logging in.  It won't turn on until a key is on the TV, and **Go back to password login** turns it off again if you lose the key.
@@ -81,11 +83,11 @@ The pairing page only runs while that screen is open.  It closes after one key, 
 - **Fix SSH at startup:** after every restart, checks that SSH came up and starts it if it didn't, and fixes keys file permissions dropbear would refuse.  The main screen says when it had to.  It never touches a port another program has.
 - **Reset to Homebrew Channel defaults** removes all of it, the startup script too.
 
-<p><img src="assets/screenshots/tv-settings-main.png" width="49%" alt="The main screen with a port change underway, a password of your own and keepalive on"> <img src="assets/screenshots/tv-settings.png" width="49%" alt="The SSH settings menu: your own password, keys only, SSH port, keepalive"></p>
+<p><img src="assets/screenshots/tv-settings-main.png" width="49%" alt="The main screen with a port change underway, a password of your own and keepalive on"> <img src="assets/screenshots/tv-settings.png" width="49%" alt="The Settings tab: your own password, keys only and keepalive as switches, and the SSH port"></p>
 
 **Keys on this TV** lists each key with its name, fingerprint and when it last logged in, and lets you rename or remove one (with a backup, so **Undo a change** can put it back).
 
-**More tools:**
+**Tools** and **More:**
 
 - **Login history:** recent logins and failed tries from the TV's own log, with where they came from, and a warning when failed tries come from outside your home network
 - **This TV's SSH keys:** fingerprints to check a first login against, or make new ones
@@ -100,7 +102,7 @@ The pairing page only runs while that screen is open.  It closes after one key, 
 
 After a key is added, the pairing page also offers a ready-made `~/.ssh/config` entry (so `ssh lgtv` just works), the `known_hosts` lines for the TV, a Windows Terminal profile, and SFTP and `scp` instructions.
 
-**Updates.**  Each time it opens, SSH Doctor checks GitHub for a newer release.  **Update to v…** shows what's new, installs it through the Homebrew Channel (which checks the download's SHA-256 first), and the app opens again by itself to show what changed.  Or check by hand in More tools, **Updates**.
+**Updates.**  Each time it opens, SSH Doctor checks GitHub for a newer release.  **Update to v…** shows what's new, installs it through the Homebrew Channel (which checks the download's SHA-256 first), and the app opens again by itself to show what changed.  Or check by hand in More, **Updates**.
 
 **Copy it on your phone or computer.**  **How to log in**, **Report for getting help** and the TV's key fingerprints each show a QR code beside them.  Scan it and a page opens on your phone with everything ready to copy, one tap each: the login command for Mac, Linux, Windows, PuTTY or SFTP, an **Open in an SSH app** link for Termius and the like, the TV's fingerprints, the `ssh-keygen -R` line for a changed host key, an SSH config, the keys that can log in, and the report with links to open a bug report.  On a computer, type the address and the code instead.  It's read only, works on several devices at once, and stops when you close that screen on the TV.  The QR code on the pairing screen carries its code too, so scanning connects straight away.
 

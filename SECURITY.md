@@ -38,7 +38,7 @@ It downloads nothing except an update you choose, opens no ports except the pair
 
 - Releases are signed by GitHub Actions, so someone who took over the GitHub account behind this repository could change the release workflow and have it sign their own release.  Uploading a file to a release or editing its manifest by hand isn't enough, and the actions the workflow uses are pinned to exact commits.
 - Versions before 0.5.2 check an update's SHA-256 but not its signature.
-- The Homebrew Channel's telnet lets anyone on your network in as root with no password while it's on.  SSH Doctor shows it, and **Turn telnet off** in More tools closes it once SSH works.
+- The Homebrew Channel's telnet lets anyone on your network in as root with no password while it's on.  SSH Doctor shows it, and the **Telnet** switch in Tools closes it once SSH works.
 - Anything that can already run commands as root on the TV can change SSH Doctor too.
 
 ## Verifying a download

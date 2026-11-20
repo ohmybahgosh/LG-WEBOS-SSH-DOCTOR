@@ -2,6 +2,13 @@
 
 All notable changes to LG webOS SSH Doctor.  Versions follow [semantic versioning](https://semver.org/).
 
+## [0.6.0] - 2026-11-20
+
+### Changed
+
+- **The main screen is laid out like LG-USB-2-ETH0's.**  The check stays on the left, and the right side has four tabs, **SSH**, **Settings**, **Tools** and **More**, picked with LEFT and RIGHT on the remote (UP from a tab's first row reaches the tabs too).  What was in the SSH settings and More tools menus is now right there in its tab, keys only, keepalive, Fix SSH at startup and telnet are switches that show whether they're on, and a tab with more rows than fit scrolls with the focus, with a rail beside it.  Fixes still show first, in the SSH tab, and More gets a dot when an update is out.
+- Bigger text on the main screen, the same size as LG-USB-2-ETH0's.
+
 ## [0.5.3] - 2026-11-14
 
 ### Changed

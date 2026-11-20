@@ -51,11 +51,13 @@ async function tv(b) {
                     const st = document.getElementById('status');
                     if (st.scrollHeight > st.clientHeight + 2) { out.msgs.push('card text cut off'); }
                     document.querySelectorAll('.btn').forEach((x) => {
-                        if (x.style.display === 'none') { return; }
+                        if (x.style.display === 'none' || x.style.visibility === 'hidden' || x.className.indexOf('off-tab') >= 0) { return; }
                         const r = x.getBoundingClientRect();
                         if (r.bottom > ft + 2) { out.msgs.push('row past footer: ' + x.textContent.trim().slice(0, 30)); }
                         if (x.scrollWidth > x.clientWidth + 1) { out.msgs.push('row too wide: ' + x.textContent.trim().slice(0, 30)); }
                     });
+                    const tb = document.getElementById('tabs');
+                    if (tb.scrollWidth > tb.clientWidth + 1) { out.msgs.push('tabs too wide'); }
                     const ov = document.getElementById('overlay');
                     if (!ov.classList.contains('hidden')) {
                         const pr = document.querySelector('.panel').getBoundingClientRect();
@@ -81,6 +83,24 @@ async function tv(b) {
             await p.waitForTimeout(700);
             await check('load');
             if (OUT && lang === 'en') { await p.screenshot({ path: path.join(OUT, `tv-${s}.png`) }); }
+            // Each tab, as in LG-USB-2-ETH0: RIGHT steps through them
+            const tabs = await p.evaluate(() => Array.from(document.querySelectorAll('.tab')).filter((x) => x.className.indexOf('gone') < 0).map((x) => x.getAttribute('data-tab')));
+            if (tabs.length < 3) { P(`${lang} ${s}: only ${tabs.length} tabs`); }
+            for (let i = 0; i < tabs.length; i++) {
+                const on = await p.evaluate(() => (document.querySelector('.tab.on') || {}).getAttribute && document.querySelector('.tab.on').getAttribute('data-tab'));
+                if (on !== tabs[i]) { P(`${lang} ${s}: tab ${tabs[i]} not open after RIGHT (${on})`); }
+                await check('tab ' + tabs[i]);
+                if (OUT && lang === 'en' && (s === 'healthy' || s === 'custom')) { await p.screenshot({ path: path.join(OUT, `tv-${s}-tab-${tabs[i]}.png`) }); }
+                // The open tab's rows all reachable with DOWN, the rail showing when they don't fit
+                const n = await p.evaluate(() => Array.from(document.querySelectorAll('.btn')).filter((x) => x.style.display !== 'none' && x.className.indexOf('off-tab') < 0).length);
+                for (let j = 0; j < n; j++) { await p.keyboard.press('ArrowDown'); }
+                const lastSeen = await p.evaluate(() => { const a = document.activeElement; return a && a.classList.contains('btn') && a.style.visibility !== 'hidden'; });
+                if (!lastSeen) { P(`${lang} ${s}: last row of ${tabs[i]} not in view`); }
+                for (let j = 0; j < n; j++) { await p.keyboard.press('ArrowUp'); }
+                await p.keyboard.press('ArrowRight');
+                await p.waitForTimeout(150);
+            }
+            for (let i = 0; i < tabs.length; i++) { await p.keyboard.press('ArrowLeft'); }
             const acts = await p.evaluate(() => Array.from(document.querySelectorAll('.btn')).filter((x) => x.style.display !== 'none').map((x) => x.getAttribute('data-action')));
             for (const a of acts) {
                 if (a === 'lang') { continue; }

@@ -54,7 +54,7 @@
 #
 # Paths can be moved under SD_ROOT for the tests.
 
-VERSION="0.5.3"
+VERSION="0.6.0"
 R="${SD_ROOT:-}"
 HERE=$(cd "$(dirname "$0")" && pwd)
 
