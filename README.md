@@ -108,7 +108,7 @@ After a key is added, the pairing page also offers a ready-made `~/.ssh/config` 
 
 <p><img src="assets/screenshots/tv-howto.png" width="70%" alt="How to log in on the TV, with a QR code to copy it on a phone"> <img src="assets/screenshots/info-phone.png" width="24%" alt="The copy page on a phone: the login command, an SSH config and the TV's known_hosts lines, each with a Copy button"></p>
 
-<p><img src="assets/screenshots/tv-sftp.png" width="49%" alt="File transfer (SFTP): the host, port and user, whether to use your key or password, and where WinSCP, FileZilla and Cyberduck take a key"> <img src="assets/screenshots/tv-update.png" width="49%" alt="The main screen offering Update to v0.5.0"></p>
+<p><img src="assets/screenshots/tv-sftp.png" width="49%" alt="File transfer (SFTP): the host, port and user, whether to use your key or password, and where WinSCP, FileZilla and Cyberduck take a key"> <img src="assets/screenshots/tv-update.png" width="49%" alt="The main screen with a newer release out, and More marked"></p>
 
 ## What it will never do
 
