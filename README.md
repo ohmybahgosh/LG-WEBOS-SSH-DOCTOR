@@ -16,7 +16,7 @@
 
 ## Install
 
-In the Homebrew Channel, add the repository `https://ohmybahgosh.dev/repo` (Settings, then Add repository), then install **SSH Doctor** from the app list.  Or download the IPK from the [latest release](https://github.com/ohmybahgosh/LG-WEBOS-SSH-DOCTOR/releases/latest) and install it with Dev Manager or `ares-install`.  It needs root, which the Homebrew Channel already has.
+In the Homebrew Channel, add the repository `https://ohmybahgosh.dev/repo` (Settings, then Add repository), then install **SSH Doctor** from the app list.  Or download the IPK from the [latest release](https://github.com/ohmybahgosh/LG-WEBOS-SSH-DOCTOR/releases/latest) and install it with Dev Manager or `ares-install`.  It needs root, which the Homebrew Channel already has.  Works with the Homebrew Channel 0.8.0, the latest.
 
 It's a TV app for the [webOS Homebrew Channel](https://github.com/webosbrew/webos-homebrew-channel) on rooted LG webOS TVs ([RootMyTV](https://rootmy.tv), [faultmanager-autoroot](https://github.com/throwaway96/faultmanager-autoroot), crashd, DejaVuln and the rest).  It runs as root through the Homebrew Channel, not over SSH, so it still works when SSH is completely broken.
 
